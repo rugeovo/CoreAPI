@@ -78,6 +78,20 @@ class RouteRegistry {
     }
 
     /**
+     * 便捷方法：注册PUT路由
+     */
+    fun registerPut(plugin: Plugin, path: String, handler: RouteHandler, requireAuth: Boolean = true) {
+        registerRoute(plugin, path, HttpMethod.PUT, handler, requireAuth)
+    }
+
+    /**
+     * 便捷方法：注册DELETE路由
+     */
+    fun registerDeete(plugin: Plugin, path: String, handler: RouteHandler, requireAuth: Boolean = true) {
+        registerRoute(plugin, path, HttpMethod.DELETE, handler, requireAuth)
+    }
+
+    /**
      * 查找路由处理器
      */
     fun findHandler(path: String, method: HttpMethod): RouteHandler? {
