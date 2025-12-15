@@ -1,0 +1,26 @@
+# CoreAPI 配置文件
+
+# HTTP服务器配置
+server:
+  # 监听端口
+  port: 8080
+  # 是否启用
+  enabled: true
+
+# 任务调度器配置
+scheduler:
+  # 队列最大容量
+  max-queue-size: 500
+  # 每tick最大处理时间(毫秒)
+  max-ms-per-tick: 10
+  # 任务超时时间(秒)
+  task-timeout-seconds: 10
+
+# 限流配置
+rate-limit:
+  # 是否启用限流
+  enabled: true
+  # 每秒允许的请求数(每IP)
+  requests-per-second: 5.0
+  # 限流器缓存过期时间(小时)
+  cache-expire-hours: 1
