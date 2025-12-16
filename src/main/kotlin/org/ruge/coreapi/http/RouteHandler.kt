@@ -55,13 +55,20 @@ enum class HttpMethod {
  * HTTP请求上下文
  * 封装请求的所有信息
  */
-data class RequestContext(
+class RequestContext(
     val method: HttpMethod,
     val uri: String,
     val headers: Map<String, String>,
     val params: Map<String, String>,
-    val body: String?
+    private val bodyLoader: () -> String?,
+    val clientIp: String
 ) {
+    /**
+     * 请求体（懒加载）
+     * 只有在首次访问时才会读取流
+     */
+    val body: String? by lazy { bodyLoader() }
+
     /**
      * 获取请求头
      */
@@ -114,13 +121,25 @@ abstract class SyncRouteHandler : RouteHandler {
     abstract fun handleSync(context: RequestContext): ApiResponse
 }
 
+
 /**
- * 异步路由处理器（用于需要主线程的操作）
+ * Bukkit主线程路由处理器
+ *
+ * 核心特性：
+ * - 框架会自动将 handleBukkit 调度到 Bukkit 主线程执行
+ * - 可以在这里安全地调用任何 Bukkit API (如 player.kick, block.setType)
+ * - 受到 TaskScheduler 的 TPS 保护和限流
  */
-abstract class AsyncRouteHandler : RouteHandler {
+abstract class BukkitSyncRouteHandler : RouteHandler {
+    // 这个方法由 CoreHttpServer 自动调度，不需要用户操心
+    override fun handle(context: RequestContext): java.util.concurrent.CompletableFuture<ApiResponse> {
+        // 这一层逻辑将由 CoreHttpServer 中的调度器接管
+        // 但为了接口兼容，我们这里暂时返回 null 或抛出异常，实际调用逻辑在 Server 中
+        throw UnsupportedOperationException("BukkitSyncRouteHandler should be handled by the server framework")
+    }
+
     /**
-     * 异步处理请求
-     * 实现类可以在这里提交任务到TaskScheduler
+     * 在主线程执行的逻辑
      */
-    abstract override fun handle(context: RequestContext): java.util.concurrent.CompletableFuture<ApiResponse>
+    abstract fun handleBukkit(context: RequestContext): ApiResponse
 }

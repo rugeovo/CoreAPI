@@ -24,13 +24,25 @@ taboolib {
 
 repositories {
     mavenCentral()
-    maven("https://repo.codemc.io/repository/maven-public/") // AuthMe
+    maven("https://repo.codemc.org/repository/maven-public/") // AuthMe
+    maven("https://oss.sonatype.org/content/repositories/snapshots") // LuckPerms
 }
 
 dependencies {
     compileOnly("ink.ptms.core:v12105:12105-minimize:mapped@jar")
     compileOnly(kotlin("stdlib"))
     compileOnly(fileTree("libs"))
+
+    // AuthMe 认证API
+    compileOnly("fr.xephi:authme:5.6.1-SNAPSHOT")
+
+    // LuckPerms 权限API
+    compileOnly("net.luckperms:api:5.4")
+
+    // JWT (JSON Web Token) 支持
+    taboo("io.jsonwebtoken:jjwt-api:0.12.3")
+    taboo("io.jsonwebtoken:jjwt-impl:0.12.3")
+    taboo("io.jsonwebtoken:jjwt-jackson:0.12.3")
 
     // HTTP服务器 - Jetty（企业级，安全更新及时）
     taboo("org.eclipse.jetty:jetty-server:11.0.20")

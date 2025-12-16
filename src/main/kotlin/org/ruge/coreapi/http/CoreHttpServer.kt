@@ -8,6 +8,7 @@ import org.eclipse.jetty.server.ServerConnector
 import org.eclipse.jetty.servlet.ServletContextHandler
 import org.eclipse.jetty.servlet.ServletHolder
 import org.eclipse.jetty.util.thread.QueuedThreadPool
+import org.ruge.coreapi.auth.AuthManager
 import taboolib.common.platform.function.info
 import taboolib.common.platform.function.warning
 import java.util.concurrent.TimeUnit
@@ -19,7 +20,12 @@ import java.util.concurrent.TimeUnit
 class CoreHttpServer(
     private val port: Int,
     private val routeRegistry: RouteRegistry,
-    private val rateLimitManager: RateLimitManager? = null
+    private val taskScheduler: org.ruge.coreapi.task.TaskScheduler, // 新增依赖
+    private val rateLimitManager: RateLimitManager? = null,
+    private val authManager: AuthManager? = null,
+    private val trustProxy: Boolean = false,
+    private val maxBodySize: Long = 1048576,
+    private val corsOrigin: String = "none"
 ) {
     private var server: Server? = null
 
@@ -111,12 +117,14 @@ class CoreHttpServer(
 
             try {
                 // 获取客户端IP
-                // 注意：X-Forwarded-For和X-Real-IP可以被伪造，仅适用于可信代理环境
-                // 如果部署在不可信网络中，攻击者可通过伪造header绕过IP限流
-                // 生产环境建议：1) 仅在可信反向代理后使用 2) 配置代理正确设置这些header
-                val clientIp = req.getHeader("X-Forwarded-For")
-                    ?: req.getHeader("X-Real-IP")
-                    ?: req.remoteAddr
+                // 安全修复：根据配置决定是否信任代理头
+                val clientIp = if (trustProxy) {
+                    req.getHeader("X-Forwarded-For")
+                        ?: req.getHeader("X-Real-IP")
+                        ?: req.remoteAddr
+                } else {
+                    req.remoteAddr
+                }
 
                 // Rate Limiting检查
                 if (rateLimitManager != null && !rateLimitManager.tryAcquire(clientIp)) {
@@ -125,17 +133,51 @@ class CoreHttpServer(
                 }
 
                 // 解析请求
-                val context = parseRequest(req, method)
+                val context = parseRequest(req, method, clientIp)
 
                 // 查找路由处理器
-                val handler = routeRegistry.findHandler(context.uri, context.method)
-                if (handler == null) {
+                val routeInfo = routeRegistry.getRouteInfo(context.uri, context.method)
+                if (routeInfo == null) {
                     sendJsonResponse(resp, 404, ApiResponse.error("路由不存在: ${method} ${context.uri}"))
                     return
                 }
 
-                // 执行处理器（可能是异步的）
-                val futureResponse = handler.handle(context)
+                // 权限认证检查
+                if (routeInfo.requireAuth && authManager != null && authManager.isEnabled()) {
+                    // 从请求头获取 token
+                    val token = context.getAuthToken()
+
+                    // 确定权限节点（优先使用自定义权限节点）
+                    val permission = routeInfo.permission
+                        ?: authManager.generatePermissionNode(routeInfo.plugin.name, routeInfo.path)
+
+                    // 执行权限检查
+                    val authResult = authManager.authenticate(token, permission)
+
+                    if (!authResult.success) {
+                        val statusCode = if (token == null) 401 else 403
+                        val errorMessage = if (token == null) {
+                            "未提供认证 token"
+                        } else {
+                            authResult.error ?: "权限不足"
+                        }
+                        sendJsonResponse(resp, statusCode, ApiResponse.error(errorMessage))
+                        return
+                    }
+                }
+
+                // 执行处理器
+                val futureResponse = if (routeInfo.handler is BukkitSyncRouteHandler) {
+                    // 特殊处理：Bukkit主线程任务
+                    // 自动提交到 TaskScheduler
+                    taskScheduler.submitTask {
+                        (routeInfo.handler as BukkitSyncRouteHandler).handleBukkit(context)
+                    }
+                } else {
+                    // 标准处理：在当前线程（HTTP线程）执行
+                    // 或者是 AsyncRouteHandler 自行处理了线程切换
+                    routeInfo.handler.handle(context)
+                }
 
                 // 等待结果（最多3秒）
                 val apiResponse = try {
@@ -161,16 +203,21 @@ class CoreHttpServer(
                 sendJsonResponse(resp, 200, apiResponse)
 
             } catch (e: Exception) {
-                warning("HTTP请求处理失败: ${e.message}")
+                // 安全修复：防止异常信息泄露敏感数据
+                // 生成一个随机错误ID，方便管理员在日志中查找
+                val errorId = java.util.UUID.randomUUID().toString().substring(0, 8)
+                warning("HTTP请求异常 [ID:$errorId]: ${e.message}")
                 e.printStackTrace()
-                sendJsonResponse(resp, 500, ApiResponse.error("服务器内部错误: ${e.message}"))
+                
+                // 返回给用户的是通用错误信息 + 错误ID
+                sendJsonResponse(resp, 500, ApiResponse.error("服务器内部错误 (Ref: $errorId)"))
             }
         }
 
         /**
          * 解析请求
          */
-        private fun parseRequest(req: HttpServletRequest, method: HttpMethod): RequestContext {
+        private fun parseRequest(req: HttpServletRequest, method: HttpMethod, clientIp: String): RequestContext {
             // 读取请求头
             val headers = mutableMapOf<String, String>()
             req.headerNames.asIterator().forEach { name ->
@@ -183,15 +230,39 @@ class CoreHttpServer(
                 params[name] = values.firstOrNull() ?: ""
             }
 
-            // 读取请求体（POST/PUT）
-            val body = if (method == HttpMethod.POST || method == HttpMethod.PUT) {
-                try {
-                    req.reader.readText()
-                } catch (e: Exception) {
+            // 构造延迟加载的Body读取器
+            val bodyLoader = {
+                if (method == HttpMethod.POST || method == HttpMethod.PUT) {
+                    try {
+                        // 安全修复：限制读取大小，防止内存溢出 (DoS)
+                        if (req.contentLengthLong > maxBodySize) {
+                            throw IllegalArgumentException("请求体过大 (超过 ${maxBodySize} 字节)")
+                        }
+                        
+                        // 读取受限内容
+                        // 使用 InputStream 直接读取字节，避免字符集编码导致的内存估算错误
+                        val inputStream = req.inputStream
+                        val buffer = ByteArray(4096)
+                        val outStream = java.io.ByteArrayOutputStream()
+                        var totalBytesRead = 0L
+                        var bytesRead: Int
+                        
+                        while (inputStream.read(buffer).also { bytesRead = it } != -1) {
+                            totalBytesRead += bytesRead
+                            if (totalBytesRead > maxBodySize) {
+                                 throw IllegalArgumentException("请求体过大 (读取超过 ${maxBodySize} 字节)")
+                            }
+                            outStream.write(buffer, 0, bytesRead)
+                        }
+                        
+                        outStream.toString("UTF-8")
+                    } catch (e: Exception) {
+                        warning("读取请求体失败: ${e.message}")
+                        null
+                    }
+                } else {
                     null
                 }
-            } else {
-                null
             }
 
             return RequestContext(
@@ -199,7 +270,8 @@ class CoreHttpServer(
                 uri = req.requestURI,
                 headers = headers,
                 params = params,
-                body = body
+                bodyLoader = bodyLoader,
+                clientIp = clientIp
             )
         }
 
@@ -220,13 +292,16 @@ class CoreHttpServer(
 
         /**
          * 应用CORS响应头
-         * 注意：当前配置为全开放（*），适用于开发环境
-         * 生产环境建议配置为特定的域名以提高安全性
          */
         private fun applyCorsHeaders(resp: HttpServletResponse) {
-            resp.addHeader("Access-Control-Allow-Origin", "*")
+            if (corsOrigin.equals("none", ignoreCase = true)) {
+                return
+            }
+            
+            resp.addHeader("Access-Control-Allow-Origin", corsOrigin)
             resp.addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
             resp.addHeader("Access-Control-Allow-Headers", "Content-Type, Authorization")
+            resp.addHeader("Access-Control-Max-Age", "3600") // 缓存预检结果1小时
         }
     }
 }

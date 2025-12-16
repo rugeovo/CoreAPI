@@ -12,7 +12,8 @@ data class RouteInfo(
     val method: HttpMethod,
     val handler: RouteHandler,
     val plugin: Plugin,
-    val requireAuth: Boolean = false
+    val requireAuth: Boolean = false,
+    val permission: String? = null  // 自定义权限节点，null 表示使用默认生成的权限节点
 )
 
 /**
@@ -34,13 +35,15 @@ class RouteRegistry {
      * @param method HTTP方法
      * @param handler 处理器
      * @param requireAuth 是否需要认证
+     * @param permission 自定义权限节点（可选，默认为 coreapi.route.<plugin>.<path>）
      */
     fun registerRoute(
         plugin: Plugin,
         path: String,
         method: HttpMethod,
         handler: RouteHandler,
-        requireAuth: Boolean = true
+        requireAuth: Boolean = true,
+        permission: String? = null
     ) {
         val normalizedPath = normalizePath(path)
         val routeKey = "${method}:${normalizedPath}"
@@ -54,7 +57,7 @@ class RouteRegistry {
         }
 
         // 注册路由
-        val routeInfo = RouteInfo(normalizedPath, method, handler, plugin, requireAuth)
+        val routeInfo = RouteInfo(normalizedPath, method, handler, plugin, requireAuth, permission)
         routes[routeKey] = routeInfo
 
         // 记录插件路由映射
@@ -66,29 +69,53 @@ class RouteRegistry {
     /**
      * 便捷方法：注册GET路由
      */
-    fun registerGet(plugin: Plugin, path: String, handler: RouteHandler, requireAuth: Boolean = true) {
-        registerRoute(plugin, path, HttpMethod.GET, handler, requireAuth)
+    fun registerGet(
+        plugin: Plugin,
+        path: String,
+        handler: RouteHandler,
+        requireAuth: Boolean = true,
+        permission: String? = null
+    ) {
+        registerRoute(plugin, path, HttpMethod.GET, handler, requireAuth, permission)
     }
 
     /**
      * 便捷方法：注册POST路由
      */
-    fun registerPost(plugin: Plugin, path: String, handler: RouteHandler, requireAuth: Boolean = true) {
-        registerRoute(plugin, path, HttpMethod.POST, handler, requireAuth)
+    fun registerPost(
+        plugin: Plugin,
+        path: String,
+        handler: RouteHandler,
+        requireAuth: Boolean = true,
+        permission: String? = null
+    ) {
+        registerRoute(plugin, path, HttpMethod.POST, handler, requireAuth, permission)
     }
 
     /**
      * 便捷方法：注册PUT路由
      */
-    fun registerPut(plugin: Plugin, path: String, handler: RouteHandler, requireAuth: Boolean = true) {
-        registerRoute(plugin, path, HttpMethod.PUT, handler, requireAuth)
+    fun registerPut(
+        plugin: Plugin,
+        path: String,
+        handler: RouteHandler,
+        requireAuth: Boolean = true,
+        permission: String? = null
+    ) {
+        registerRoute(plugin, path, HttpMethod.PUT, handler, requireAuth,permission)
     }
 
     /**
      * 便捷方法：注册DELETE路由
      */
-    fun registerDeete(plugin: Plugin, path: String, handler: RouteHandler, requireAuth: Boolean = true) {
-        registerRoute(plugin, path, HttpMethod.DELETE, handler, requireAuth)
+    fun registerDelete(
+        plugin: Plugin,
+        path: String,
+        handler: RouteHandler,
+        requireAuth: Boolean = true,
+        permission: String? = null
+    ) {
+        registerRoute(plugin, path, HttpMethod.DELETE, handler, requireAuth, permission)
     }
 
     /**

@@ -1,6 +1,10 @@
 package org.ruge.coreapi
 
 import org.bukkit.Bukkit
+import org.ruge.coreapi.auth.AuthManager
+import org.ruge.coreapi.auth.AuthService
+import org.ruge.coreapi.auth.JwtManager
+import org.ruge.coreapi.auth.TokenParser
 import org.ruge.coreapi.config.ConfigManager
 import org.ruge.coreapi.http.*
 import org.ruge.coreapi.listener.PluginListener
@@ -17,7 +21,12 @@ object CoreAPI : Plugin() {
     private lateinit var taskScheduler: TaskScheduler
     private lateinit var routeRegistry: RouteRegistry
     private var rateLimitManager: RateLimitManager? = null
+    private var authManager: AuthManager? = null
     private var httpServer: CoreHttpServer? = null
+
+    // 认证组件
+    private lateinit var jwtManager: JwtManager
+    private lateinit var authService: AuthService
 
     override fun onEnable() {
         info("CoreAPI 正在启动...")
@@ -39,7 +48,9 @@ object CoreAPI : Plugin() {
         taskScheduler = TaskScheduler(
             plugin = Bukkit.getPluginManager().getPlugin("CoreAPI")!!,
             maxQueueSize = ConfigManager.maxQueueSize,
-            maxMsPerTick = ConfigManager.maxMsPerTick,
+            maxTasksPerTick = ConfigManager.maxTasksPerTick,
+            slowTaskThresholdMs = ConfigManager.slowTaskThresholdMs,
+            minTpsThreshold = ConfigManager.minTpsThreshold,
             taskTimeoutSeconds = ConfigManager.taskTimeoutSeconds
         )
         taskScheduler.start()
@@ -64,6 +75,15 @@ object CoreAPI : Plugin() {
             )
         }
 
+        // 延迟初始化认证服务（等待 AuthMe 加载完成）
+        Bukkit.getScheduler().runTaskLater(
+            Bukkit.getPluginManager().getPlugin("CoreAPI")!!,
+            Runnable {
+                initializeAuthServices()
+            },
+            20L // 延迟 1 秒（20 ticks）
+        )
+
         // 注册内置API路由
         registerBuiltinRoutes()
 
@@ -73,7 +93,12 @@ object CoreAPI : Plugin() {
             httpServer = CoreHttpServer(
                 port = ConfigManager.serverPort,
                 routeRegistry = routeRegistry,
-                rateLimitManager = rateLimitManager
+                taskScheduler = taskScheduler,
+                rateLimitManager = rateLimitManager,
+                authManager = authManager,
+                trustProxy = ConfigManager.serverTrustProxy,
+                maxBodySize = ConfigManager.serverMaxBodySize,
+                corsOrigin = ConfigManager.serverCorsOrigin
             )
             try {
                 httpServer?.startServer()
@@ -97,10 +122,151 @@ object CoreAPI : Plugin() {
     }
 
     /**
+     * 初始化认证服务（延迟执行，确保 AuthMe 已加载）
+     */
+    private fun initializeAuthServices() {
+        info("初始化认证服务...")
+
+        // 初始化JWT管理器
+        info("初始化JWT管理器...")
+        jwtManager = JwtManager(
+            secretKey = ConfigManager.jwtSecret,
+            expirationHours = ConfigManager.jwtExpirationHours
+        )
+
+        // 初始化认证服务
+        info("初始化AuthMe认证服务...")
+        authService = AuthService(
+            jwtManager = jwtManager,
+            maxLoginAttempts = ConfigManager.authMaxLoginAttempts,
+            lockoutMinutes = ConfigManager.authLockoutMinutes
+        )
+        authService.initialize()
+
+        // 初始化权限认证管理器
+        info("初始化LuckPerms权限管理器...")
+        val tokenParser = TokenParser(jwtManager)
+        authManager = AuthManager(tokenParser)
+        authManager!!.initialize()
+
+        info("认证服务初始化完成")
+    }
+
+    /**
      * 注册内置API路由
      */
     private fun registerBuiltinRoutes() {
         val plugin = Bukkit.getPluginManager().getPlugin("CoreAPI")!!
+
+        // POST /login - 用户登录
+        routeRegistry.registerPost(plugin, "/login", object : SyncRouteHandler() {
+            override fun handleSync(context: RequestContext): ApiResponse {
+                try {
+                    // 解析请求体
+                    val body = context.body ?: return ApiResponse.error("请求体不能为空")
+                    val gson = com.google.gson.Gson()
+                    val request = try {
+                        gson.fromJson(body, LoginRequest::class.java)
+                    } catch (e: com.google.gson.JsonSyntaxException) {
+                        return ApiResponse.error("JSON格式错误")
+                    } catch (e: com.google.gson.JsonParseException) {
+                        return ApiResponse.error("JSON解析失败")
+                    }
+
+                    // 验证参数
+                    if (request.username.isBlank()) {
+                        return ApiResponse.error("用户名不能为空")
+                    }
+                    if (request.password.isBlank()) {
+                        return ApiResponse.error("密码不能为空")
+                    }
+
+                    // 获取客户端IP (安全)
+                    val clientIp = context.clientIp
+
+                    // 调用登录服务
+                    val result = authService.login(request.username, request.password, clientIp)
+
+                    return if (result.success) {
+                        ApiResponse.success(
+                            mapOf(
+                                "token" to result.token,
+                                "uuid" to result.uuid.toString(),
+                                "username" to result.username
+                            )
+                        )
+                    } else {
+                        ApiResponse.error(result.error ?: "登录失败")
+                    }
+                } catch (e: IllegalArgumentException) {
+                    return ApiResponse.error("参数错误: ${e.message}")
+                } catch (e: Exception) {
+                    warning("登录异常: ${e.message}")
+                    return ApiResponse.error("登录服务异常，请稍后重试")
+                }
+            }
+        }, requireAuth = false)
+
+        // POST /register - 用户注册
+        routeRegistry.registerPost(plugin, "/register", object : SyncRouteHandler() {
+            override fun handleSync(context: RequestContext): ApiResponse {
+                try {
+                    // 解析请求体
+                    val body = context.body ?: return ApiResponse.error("请求体不能为空")
+                    val gson = com.google.gson.Gson()
+                    val request = try {
+                        gson.fromJson(body, RegisterRequest::class.java)
+                    } catch (e: com.google.gson.JsonSyntaxException) {
+                        return ApiResponse.error("JSON格式错误")
+                    } catch (e: com.google.gson.JsonParseException) {
+                        return ApiResponse.error("JSON解析失败")
+                    }
+
+                    // 验证用户名
+                    if (request.username.isBlank()) {
+                        return ApiResponse.error("用户名不能为空")
+                    }
+                    if (request.username.length < 3) {
+                        return ApiResponse.error("用户名至少需要3个字符")
+                    }
+                    if (request.username.length > 16) {
+                        return ApiResponse.error("用户名不能超过16个字符")
+                    }
+                    if (!request.username.matches(Regex("^[a-zA-Z0-9_]+$"))) {
+                        return ApiResponse.error("用户名只能包含字母、数字和下划线")
+                    }
+
+                    // ✅ 安全修复：验证密码强度
+                    val passwordValidation = validatePassword(request.password)
+                    if (!passwordValidation.isValid) {
+                        return ApiResponse.error(passwordValidation.error!!)
+                    }
+
+                    // 获取客户端IP (安全)
+                    val clientIp = context.clientIp
+
+                    // 调用注册服务
+                    val result = authService.register(request.username, request.password, clientIp)
+
+                    return if (result.success) {
+                        ApiResponse.success(
+                            mapOf(
+                                "token" to result.token,
+                                "uuid" to result.uuid.toString(),
+                                "username" to result.username
+                            )
+                        )
+                    } else {
+                        ApiResponse.error(result.error ?: "注册失败")
+                    }
+                } catch (e: IllegalArgumentException) {
+                    return ApiResponse.error("参数错误: ${e.message}")
+                } catch (e: Exception) {
+                    warning("注册异常: ${e.message}")
+                    return ApiResponse.error("注册服务异常，请稍后重试")
+                }
+            }
+        }, requireAuth = false)
 
         // GET /status - 服务器状态
         routeRegistry.registerGet(plugin, "/status", object : SyncRouteHandler() {
@@ -119,7 +285,7 @@ object CoreAPI : Plugin() {
                     )
                 )
             }
-        }, requireAuth = false)
+        }, requireAuth = true)
 
         // GET /routes - 路由列表
         routeRegistry.registerGet(plugin, "/routes", object : SyncRouteHandler() {
@@ -136,8 +302,20 @@ object CoreAPI : Plugin() {
             }
         }, requireAuth = false)
 
-        info("内置路由已注册: /status, /routes")
+
+        info("内置路由已注册: /login, /register, /status, /routes")
     }
+
+    // 请求数据类
+    private data class LoginRequest(
+        val username: String,
+        val password: String
+    )
+
+    private data class RegisterRequest(
+        val username: String,
+        val password: String
+    )
 
     /**
      * 公开API：供其他插件注册路由
@@ -155,4 +333,66 @@ object CoreAPI : Plugin() {
      * 公开API：获取任务调度器
      */
     fun getTaskScheduler(): TaskScheduler = taskScheduler
+
+    /**
+     * 验证密码强度
+     *
+     * 密码要求：
+     * - 至少 8 个字符
+     * - 至少包含 1 个字母
+     * - 至少包含 1 个数字
+     * - 不能包含用户名
+     *
+     * @param password 待验证的密码
+     * @return PasswordValidation 验证结果
+     */
+    private fun validatePassword(password: String): PasswordValidation {
+        // 1. 长度检查
+        if (password.length < 8) {
+            return PasswordValidation.invalid("密码至少需要8个字符")
+        }
+
+        if (password.length > 128) {
+            return PasswordValidation.invalid("密码不能超过128个字符")
+        }
+
+        // 2. 复杂度检查：必须包含字母
+        if (!password.matches(Regex(".*[a-zA-Z].*"))) {
+            return PasswordValidation.invalid("密码必须包含至少1个字母")
+        }
+
+        // 3. 复杂度检查：必须包含数字
+        if (!password.matches(Regex(".*[0-9].*"))) {
+            return PasswordValidation.invalid("密码必须包含至少1个数字")
+        }
+
+        // 4. 弱密码检查
+        val commonWeakPasswords = listOf(
+            "12345678", "password", "password123", "qwerty123", "abc123456",
+            "admin123", "letmein123", "welcome123", "monkey123", "dragon123"
+        )
+        if (commonWeakPasswords.contains(password.lowercase())) {
+            return PasswordValidation.invalid("密码过于简单，请使用更复杂的密码")
+        }
+
+        // 5. 连续字符检查（如 "11111111", "aaaaaaaa"）
+        if (password.matches(Regex("(.)\\1{7,}"))) {
+            return PasswordValidation.invalid("密码不能包含过多重复字符")
+        }
+
+        return PasswordValidation.valid()
+    }
+
+    /**
+     * 密码验证结果
+     */
+    private data class PasswordValidation(
+        val isValid: Boolean,
+        val error: String?
+    ) {
+        companion object {
+            fun valid() = PasswordValidation(true, null)
+            fun invalid(error: String) = PasswordValidation(false, error)
+        }
+    }
 }

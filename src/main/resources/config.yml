@@ -6,13 +6,28 @@ server:
   port: 8080
   # 是否启用
   enabled: true
+  # 是否信任代理头 (X-Forwarded-For 等)
+  # 警告: 仅当服务器运行在可信的反向代理(如Nginx)后才设为 true
+  # 如果直接暴露在公网，必须设为 false，否则会被伪造IP绕过限流
+  trust-proxy: false
+  # 请求体最大大小 (字节), 默认 1MB
+  max-body-size-bytes: 1048576
+  # CORS 允许的域名 (Access-Control-Allow-Origin)
+  # 设为 "*" 允许所有域名 (开发环境)
+  # 设为具体域名如 "https://admin.myserver.com" 提高安全性
+  # 设为 "none" 禁用 CORS
+  cors-origin: "none"
 
 # 任务调度器配置
 scheduler:
   # 队列最大容量
   max-queue-size: 500
-  # 每tick最大处理时间(毫秒)
-  max-ms-per-tick: 10
+  # 每tick最大处理任务数 (防止单tick任务过多)
+  max-tasks-per-tick: 50
+  # 慢任务报警阈值 (毫秒) - 超过此时间的任务会在后台报错
+  slow-task-threshold-ms: 10
+  # 最低TPS阈值 - 低于此值时暂停处理任务 (熔断机制)
+  min-tps-threshold: 12.0
   # 任务超时时间(秒)
   task-timeout-seconds: 10
 
@@ -24,3 +39,18 @@ rate-limit:
   requests-per-second: 5.0
   # 限流器缓存过期时间(小时)
   cache-expire-hours: 1
+
+# JWT 认证配置
+jwt:
+  # JWT 密钥（必须修改为随机字符串，至少32位）
+  # 警告：请务必修改此密钥！使用随机生成的强密码！
+  secret: "CHANGE-THIS-TO-A-RANDOM-SECRET-KEY-AT-LEAST-32-CHARS-LONG"
+  # Token 过期时间（小时）
+  expiration-hours: 24
+
+# 登录安全配置
+auth:
+  # 最大登录失败次数
+  max-login-attempts: 5
+  # 锁定时间（分钟）
+  lockout-minutes: 15
