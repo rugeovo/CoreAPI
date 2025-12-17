@@ -114,23 +114,22 @@ class AuthService(
             return LoginResult.failure("IP 地址已被临时锁定，请 $lockoutMinutes 分钟后重试")
         }
 
-        // 检查用户名是否被锁定（失败次数过多）
+        // ✅ 缓存过期竞态修复：先检查用户名锁定（不依赖 IP 锁定）
         val attempts = loginAttempts.getIfPresent(username) ?: 0
         if (attempts >= maxLoginAttempts) {
-            // 锁定 IP
-            ipBlacklist.put(clientIp, System.currentTimeMillis())
-            return LoginResult.failure("登录失败次数过多，已锁定 $lockoutMinutes 分钟")
+            // 已达到最大失败次数，拒绝登录
+            return LoginResult.failure("登录失败次数过多，账户已被锁定 $lockoutMinutes 分钟")
         }
 
         // 检查用户是否存在
         if (!authMeApi!!.isRegistered(username)) {
-            recordLoginFailure(username)
+            recordLoginFailure(username, clientIp)
             return LoginResult.failure("用户名或密码错误")
         }
 
         // 验证密码（直接调用 AuthMe API）
         if (!authMeApi!!.checkPassword(username, password)) {
-            recordLoginFailure(username)
+            recordLoginFailure(username, clientIp)
             return LoginResult.failure("用户名或密码错误")
         }
 
@@ -197,10 +196,19 @@ class AuthService(
 
     /**
      * 记录登录失败
+     *
+     * ✅ 缓存过期竞态修复：达到阈值时立即锁定 IP 并清除计数器
      */
-    private fun recordLoginFailure(username: String) {
-        val attempts = loginAttempts.getIfPresent(username) ?: 0
-        loginAttempts.put(username, attempts + 1)
+    private fun recordLoginFailure(username: String, clientIp: String) {
+        val attempts = (loginAttempts.getIfPresent(username) ?: 0) + 1
+        loginAttempts.put(username, attempts)
+
+        // 如果达到最大失败次数，立即锁定 IP 并清除计数器
+        if (attempts >= maxLoginAttempts) {
+            ipBlacklist.put(clientIp, System.currentTimeMillis())
+            loginAttempts.invalidate(username)  // 清除计数器，避免缓存过期竞态
+            warning("用户 $username 登录失败 $attempts 次，已锁定 IP $clientIp")
+        }
     }
 
     /**

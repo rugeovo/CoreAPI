@@ -70,30 +70,36 @@ class TaskScheduler(
         // 1. 定量处理：每tick最多处理 N 个任务
         // 这保证了吞吐量，同时避免单tick处理数千个任务导致瞬时卡顿
         var processedCount = 0
-        
+
         while (processedCount < maxTasksPerTick && !taskQueue.isEmpty()) {
             val task = taskQueue.poll() ?: break
-            
+
             // 2. 看门狗监控 (Watchdog)
             val start = System.nanoTime()
+            var executed = false
             try {
-                task.execute()
+                // ✅ Semaphore 泄漏修复：execute() 返回是否真正执行
+                executed = task.execute()
             } catch (e: Exception) {
                 warning("任务执行异常: ${e.message}")
                 e.printStackTrace()
                 task.fail(e)
+                executed = true  // 即使失败也算执行了
             } finally {
-                queueLimit.release()
-                processedCount++
-                totalProcessed.incrementAndGet()
+                // ✅ 修复：只有真正执行的任务才 release（未执行说明已在超时处理器中 release 了）
+                if (executed) {
+                    queueLimit.release()
+                    processedCount++
+                    totalProcessed.incrementAndGet()
+                }
             }
-            
+
             val durationNs = System.nanoTime() - start
             val durationMs = durationNs / 1_000_000.0
-            
+
             // 3. 慢任务报警
             // 如果一个任务卡了主线程，必须让开发者知道
-            if (durationMs > slowTaskThresholdMs) {
+            if (durationMs > slowTaskThresholdMs && executed) {
                 warning("⚠️ [主线程卡顿检测] 发现慢任务！耗时: %.2f ms (阈值: %d ms)".format(durationMs, slowTaskThresholdMs))
                 // 这里可以考虑打印堆栈或任务信息来定位问题
             }
@@ -121,26 +127,20 @@ class TaskScheduler(
         val future = CompletableFuture<T>()
         val asyncTask = AsyncTask(task, future)
 
-        // ✅ 安全修复：超时时释放资源
+        // ✅ Semaphore 泄漏修复：使用 cancel() 方法确保 semaphore 只被释放一次
         Bukkit.getScheduler().runTaskLater(plugin, Runnable {
-            if (!future.isDone) {
-                // 1. 标记任务为超时失败
-                future.completeExceptionally(TimeoutException("任务等待调度超时 (${taskTimeoutSeconds}s)"))
-
-                // 2. 尝试从队列中移除任务（如果还在队列中）
-                val removed = taskQueue.remove(asyncTask)
-
-                // 3. 如果成功移除（任务还在队列中），释放 semaphore
-                if (removed) {
-                    queueLimit.release()
-                    warning("任务超时并已从队列移除，资源已释放")
-                } else {
-                    // 任务已经被处理或正在处理，semaphore 会在 processTick 中释放
-                    warning("任务超时，但已被调度执行")
-                }
-
+            // 尝试取消任务（如果任务已开始执行，cancel() 返回 false）
+            if (asyncTask.cancel(TimeoutException("任务等待调度超时 (${taskTimeoutSeconds}s)"))) {
+                // 成功取消：任务还在队列中或刚被 poll 但还未执行
+                // 从队列中移除（如果还在队列中）
+                taskQueue.remove(asyncTask)
+                // 释放 semaphore（因为任务不会被执行了）
+                queueLimit.release()
                 totalTimeout.incrementAndGet()
+                warning("任务超时已取消并释放资源")
             }
+            // 如果 cancel() 返回 false，说明任务已经开始执行
+            // semaphore 会在 processTick 的 finally 块中释放
         }, taskTimeoutSeconds * 20L)
 
         taskQueue.offer(asyncTask)

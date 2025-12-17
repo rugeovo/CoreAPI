@@ -84,6 +84,8 @@ class AuthManager(
     /**
      * 检查用户权限
      *
+     * ✅ 性能修复：使用同步缓存查询，避免阻塞 HTTP 线程
+     *
      * @param uuid 用户 UUID
      * @param permission 权限节点
      * @return AuthResult 认证结果
@@ -94,10 +96,17 @@ class AuthManager(
         }
 
         try {
-            // 加载用户数据
-            val userFuture = luckPerms!!.userManager.loadUser(uuid)
-            val user: User = userFuture.join()
-                ?: return AuthResult.failure("用户 $uuid 不存在")
+            // ✅ 性能修复：使用 getUser() 同步获取缓存用户，而非 loadUser().join() 阻塞加载
+            // getUser() 只查询内存缓存，不会阻塞等待数据库 I/O
+            val user: User? = luckPerms!!.userManager.getUser(uuid)
+
+            // 如果用户不在缓存中，说明用户数据未就绪（罕见情况）
+            if (user == null) {
+                warning("用户 $uuid 不在 LuckPerms 缓存中，触发异步加载")
+                // 触发异步加载（下次请求时会命中缓存）
+                luckPerms!!.userManager.loadUser(uuid)
+                return AuthResult.failure("用户数据未就绪，请稍后重试")
+            }
 
             // 获取用户的权限数据
             val permissionData = user.cachedData.permissionData
