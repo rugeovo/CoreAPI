@@ -483,11 +483,11 @@ curl -X GET http://localhost:8080/routes
 **build.gradle.kts**：
 ```kotlin
 repositories {
-    maven("https://jitpack.io")
+    maven("https://jitpack.io")  // ← 必须添加
 }
 
 dependencies {
-    compileOnly("com.github.yourusername:CoreAPI:1.0.0")
+    implementation("com.github.rugeovo:CoreAPI:1.0.0")
 }
 ```
 
