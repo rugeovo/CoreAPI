@@ -10,7 +10,11 @@ plugins {
     java
     id("io.izzel.taboolib") version "2.0.27"
     id("org.jetbrains.kotlin.jvm") version "2.2.0"
+    `maven-publish`
 }
+
+group = "com.github.rugeovo"
+version = "1.0.0"
 
 taboolib {
     env {
@@ -83,4 +87,16 @@ java {
 
 tasks.test {
     useJUnitPlatform()
+}
+
+// Maven发布配置 - 用于JitPack
+publishing {
+    publications {
+        create<MavenPublication>("maven") {
+            from(components["java"])
+            groupId = project.group.toString()
+            artifactId = "coreapi"
+            version = project.version.toString()
+        }
+    }
 }
