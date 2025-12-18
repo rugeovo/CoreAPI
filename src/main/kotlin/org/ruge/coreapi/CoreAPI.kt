@@ -16,15 +16,6 @@ import taboolib.common.platform.function.info
 import taboolib.common.platform.function.warning
 import java.util.concurrent.CompletableFuture
 
-/**
- * CoreAPI 主插件类
- * 
- * 插件依赖说明：
- * - LuckPerms: softdepend（可选依赖，用于权限验证）
- * - AuthMe: softdepend（可选依赖，用于用户认证）
- * 
- * 如果这些插件在 CoreAPI 之后加载，权限验证会自动延迟初始化
- */
 object CoreAPI : Plugin() {
 
     // 核心组件

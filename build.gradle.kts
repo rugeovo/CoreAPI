@@ -49,14 +49,14 @@ dependencies {
     // LuckPerms 权限API
     compileOnly("net.luckperms:api:5.4")
 
-    // JWT (JSON Web Token) 支持
-    taboo("io.jsonwebtoken:jjwt-api:0.12.3")
-    taboo("io.jsonwebtoken:jjwt-impl:0.12.3")
-    taboo("io.jsonwebtoken:jjwt-jackson:0.12.3")
+    // JWT (JSON Web Token) 支持 - 修复 CVE-2025-52999
+    taboo("io.jsonwebtoken:jjwt-api:0.12.6")
+    taboo("io.jsonwebtoken:jjwt-impl:0.12.6")
+    taboo("io.jsonwebtoken:jjwt-jackson:0.12.6")
 
-    // HTTP服务器 - Jetty（企业级，安全更新及时）
-    taboo("org.eclipse.jetty:jetty-server:11.0.20")
-    taboo("org.eclipse.jetty:jetty-servlet:11.0.20")
+    // HTTP服务器 - Jetty（企业级，安全更新及时）- 修复 CVE-2024-8184, CVE-2024-6763
+    taboo("org.eclipse.jetty:jetty-server:11.0.26")
+    taboo("org.eclipse.jetty:jetty-servlet:11.0.26")
 
     // 缓存和限流
     taboo("com.google.guava:guava:32.1.3-jre")
