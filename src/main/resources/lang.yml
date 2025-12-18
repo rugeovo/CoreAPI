@@ -1,0 +1,120 @@
+# CoreAPI 语言文件
+# 支持占位符: {0}, {1}, {2} 等
+# 支持 Minecraft 颜色代码: &a, &c, &e 等
+
+# ==================== 启动消息 ====================
+startup:
+  loading: "CoreAPI 正在启动..."
+  tps-monitor: "启动TPS监控..."
+  config: "加载配置文件..."
+  task-scheduler: "初始化任务调度器..."
+  route-registry: "初始化路由注册表..."
+  plugin-listener: "注册插件卸载监听器..."
+  rate-limiter: "初始化限流管理器..."
+  auth-service: "初始化认证服务..."
+  http-server: "启动HTTP服务器..."
+  success: "CoreAPI 启动成功！"
+  success-no-http: "HTTP服务器已禁用，CoreAPI 启动成功！"
+  http-failed: "HTTP服务器启动失败: {0}"
+
+# ==================== 关闭消息 ====================
+shutdown:
+  closing: "CoreAPI 正在关闭..."
+  closed: "CoreAPI 已关闭"
+
+# ==================== 认证模块 ====================
+auth:
+  # JWT 管理器
+  jwt-init: "初始化JWT管理器..."
+  jwt-key-info: "JWT 管理器已初始化，密钥长度: {0} 字符 / {1} 字节"
+  jwt-verify-failed: "JWT token 验证失败: {0}"
+  
+  # AuthMe 服务
+  authme-init: "初始化AuthMe认证服务..."
+  authme-not-found: "AuthMe 插件未安装或未启用，认证服务已禁用"
+  authme-enabled: "AuthMe 认证服务已启用（登录/注册限流: 1 req/s/IP）"
+  authme-init-failed: "初始化 AuthMe API 失败: {0}"
+  authme-disabled: "认证服务已禁用"
+  register-failed-exception: "用户注册失败: {0}"
+  login-locked: "用户 {0} 登录失败 {1} 次，已锁定 IP {2}"
+  
+  # LuckPerms 管理器
+  luckperms-init: "初始化LuckPerms权限管理器..."
+  luckperms-not-found: "LuckPerms 插件未安装或未启用，权限认证功能已禁用"
+  luckperms-delayed-init: "如果稍后加载 LuckPerms，权限验证将自动启用"
+  luckperms-enabled: "LuckPerms 权限认证已启用"
+  luckperms-not-ready: "LuckPerms API 尚未就绪，权限认证功能暂时禁用"
+  luckperms-retry: "将在后续请求时自动重试初始化"
+  luckperms-init-failed: "初始化 LuckPerms API 失败: {0}"
+  luckperms-disabled: "权限认证功能已禁用"
+  luckperms-load-user-failed: "加载用户 {0} 数据失败: {1}"
+  luckperms-check-permission-failed: "检查权限时发生错误: {0}"
+  auth-complete: "认证服务初始化完成"
+  
+  # 登录/注册异常
+  login-exception: "登录异常: {0}"
+  register-exception: "注册异常: {0}"
+
+# ==================== HTTP 服务器 ====================
+http:
+  server-started: "HTTP服务器已启动 - 端口: {0}"
+  server-url: "API地址: http://localhost:{0}/"
+  server-start-failed: "HTTP服务器启动失败: {0}"
+  server-stopped: "HTTP服务器已停止"
+  server-stop-failed: "HTTP服务器停止失败: {0}"
+  slow-request: "慢请求: {0} {1} - {2}ms"
+  request-exception: "HTTP请求异常 [ID:{0}]: {1}"
+  read-body-failed: "读取请求体失败: {0}"
+
+# ==================== 路由管理 ====================
+route:
+  registered: "路由已注册: {0} {1} -> {2}"
+  builtin-registered: "内置路由已注册: /login, /register, /status, /routes"
+  plugin-unloaded: "插件 {0} 已卸载，路由已自动清理"
+  plugin-routes-unregistered: "已注销插件 {0} 的 {1} 个路由"
+
+# ==================== 任务调度器 ====================
+task:
+  scheduler-started: "任务调度器(Watchdog模式)已启动 - 队列: {0}, 吞吐量: {1}/tick, 熔断TPS: {2}"
+  server-lag: "⚠️ 服务器严重卡顿 (TPS < {0}) - 暂停处理 API 任务"
+  execution-exception: "任务执行异常: {0}"
+  slow-task: "⚠️ [主线程卡顿检测] 发现慢任务！耗时: {0} ms (阈值: {1} ms)"
+  queue-high-load: "⚠️ 任务队列高负载: {0} / {1} - 请检查是否有插件在大量提交任务"
+  task-timeout: "任务超时已取消并释放资源"
+  scheduler-stats: "调度统计 (TPS: {0}) | 处理: {1} | 积压: {2} | 拒绝: {3} | 超时: {4}"
+
+# ==================== API 响应消息 ====================
+api:
+  # 通用错误
+  empty-body: "请求体不能为空"
+  json-syntax-error: "JSON格式错误"
+  json-parse-error: "JSON解析失败"
+  param-error: "参数错误: {0}"
+  service-exception: "服务异常，请稍后重试"
+  route-not-found: "路由不存在: {0} {1}"
+  
+  # 登录相关
+  username-empty: "用户名不能为空"
+  password-empty: "密码不能为空"
+  login-failed: "登录失败"
+  login-service-exception: "登录服务异常，请稍后重试"
+  
+  # 注册相关
+  username-too-short: "用户名至少需要3个字符"
+  username-too-long: "用户名不能超过16个字符"
+  username-invalid-chars: "用户名只能包含字母、数字和下划线"
+  register-failed: "注册失败"
+  register-service-exception: "注册服务异常，请稍后重试"
+  
+  # 密码验证
+  password-too-short: "密码至少需要8个字符"
+  password-too-long: "密码不能超过128个字符"
+  password-no-letter: "密码必须包含至少1个字母"
+  password-no-digit: "密码必须包含至少1个数字"
+  password-too-weak: "密码过于简单，请使用更复杂的密码"
+  password-repeated-chars: "密码不能包含过多重复字符"
+
+# ==================== 语言文件自身 ====================
+lang:
+  missing-key: "语言文件缺少消息键: {0}"
+  missing-required-key: "语言文件缺少必需的消息键: {0}"

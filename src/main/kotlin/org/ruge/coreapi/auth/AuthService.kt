@@ -5,6 +5,7 @@ import com.google.common.cache.Cache
 import com.google.common.util.concurrent.RateLimiter
 import fr.xephi.authme.api.v3.AuthMeApi
 import org.bukkit.Bukkit
+import org.ruge.coreapi.lang.LanguageManager
 import taboolib.common.platform.function.info
 import taboolib.common.platform.function.warning
 import java.util.*
@@ -58,7 +59,7 @@ class AuthService(
             // 检查 AuthMe 插件是否存在
             val authMePlugin = Bukkit.getPluginManager().getPlugin("AuthMe")
             if (authMePlugin == null || !authMePlugin.isEnabled) {
-                warning("AuthMe 插件未安装或未启用，认证服务已禁用")
+                warning(LanguageManager.getMessage("auth.authme-not-found"))
                 enabled = false
                 return
             }
@@ -66,11 +67,11 @@ class AuthService(
             // 获取 AuthMe API
             authMeApi = AuthMeApi.getInstance()
             enabled = true
-            info("AuthMe 认证服务已启用（登录/注册限流: 1 req/s/IP）")
+            info(LanguageManager.getMessage("auth.authme-enabled"))
 
         } catch (e: Exception) {
-            warning("初始化 AuthMe API 失败: ${e.message}")
-            warning("认证服务已禁用")
+            warning(LanguageManager.getMessage("auth.authme-init-failed", e.message ?: "Unknown error"))
+            warning(LanguageManager.getMessage("auth.authme-disabled"))
             enabled = false
         }
     }
@@ -189,7 +190,7 @@ class AuthService(
             return RegisterResult.success(token, uuid, username)
 
         } catch (e: Exception) {
-            warning("用户注册失败: ${e.message}")
+            warning(LanguageManager.getMessage("auth.register-failed-exception", e.message ?: "Unknown error"))
             return RegisterResult.failure("注册失败: ${e.message}")
         }
     }
@@ -207,7 +208,7 @@ class AuthService(
         if (attempts >= maxLoginAttempts) {
             ipBlacklist.put(clientIp, System.currentTimeMillis())
             loginAttempts.invalidate(username)  // 清除计数器，避免缓存过期竞态
-            warning("用户 $username 登录失败 $attempts 次，已锁定 IP $clientIp")
+            warning(LanguageManager.getMessage("auth.login-locked", username, attempts, clientIp))
         }
     }
 

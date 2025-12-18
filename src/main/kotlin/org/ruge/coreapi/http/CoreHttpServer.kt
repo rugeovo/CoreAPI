@@ -9,6 +9,7 @@ import org.eclipse.jetty.servlet.ServletContextHandler
 import org.eclipse.jetty.servlet.ServletHolder
 import org.eclipse.jetty.util.thread.QueuedThreadPool
 import org.ruge.coreapi.auth.AuthManager
+import org.ruge.coreapi.lang.LanguageManager
 import taboolib.common.platform.function.info
 import taboolib.common.platform.function.warning
 import java.util.concurrent.TimeUnit
@@ -62,10 +63,10 @@ class CoreHttpServer(
         // 启动服务器
         try {
             server?.start()
-            info("HTTP服务器已启动 - 端口: $port")
-            info("API地址: http://localhost:$port/")
+            info(LanguageManager.getMessage("http.server-started", port))
+            info(LanguageManager.getMessage("http.server-url", port))
         } catch (e: Exception) {
-            warning("HTTP服务器启动失败: ${e.message}")
+            warning(LanguageManager.getMessage("http.server-start-failed", e.message ?: "Unknown error"))
             throw e
         }
     }
@@ -76,9 +77,9 @@ class CoreHttpServer(
     fun stopServer() {
         try {
             server?.stop()
-            info("HTTP服务器已停止")
+            info(LanguageManager.getMessage("http.server-stopped"))
         } catch (e: Exception) {
-            warning("HTTP服务器停止失败: ${e.message}")
+            warning(LanguageManager.getMessage("http.server-stop-failed", e.message ?: "Unknown error"))
         }
     }
 
@@ -196,7 +197,7 @@ class CoreHttpServer(
                 // 记录慢请求
                 val elapsed = System.currentTimeMillis() - startTime
                 if (elapsed > 1000) {
-                    warning("慢请求: ${method} ${context.uri} - ${elapsed}ms")
+                    warning(LanguageManager.getMessage("http.slow-request", method, context.uri, elapsed))
                 }
 
                 // 返回响应
@@ -206,7 +207,7 @@ class CoreHttpServer(
                 // 安全修复：防止异常信息泄露敏感数据
                 // 生成一个随机错误ID，方便管理员在日志中查找
                 val errorId = java.util.UUID.randomUUID().toString().substring(0, 8)
-                warning("HTTP请求异常 [ID:$errorId]: ${e.message}")
+                warning(LanguageManager.getMessage("http.request-exception", errorId, e.message ?: "Unknown error"))
                 e.printStackTrace()
                 
                 // 返回给用户的是通用错误信息 + 错误ID
@@ -257,7 +258,7 @@ class CoreHttpServer(
                         
                         outStream.toString("UTF-8")
                     } catch (e: Exception) {
-                        warning("读取请求体失败: ${e.message}")
+                        warning(LanguageManager.getMessage("http.read-body-failed", e.message ?: "Unknown error"))
                         null
                     }
                 } else {

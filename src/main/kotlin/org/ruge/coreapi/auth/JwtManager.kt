@@ -3,6 +3,7 @@ package org.ruge.coreapi.auth
 import io.jsonwebtoken.Claims
 import io.jsonwebtoken.Jwts
 import io.jsonwebtoken.security.Keys
+import org.ruge.coreapi.lang.LanguageManager
 import taboolib.common.platform.function.warning
 import java.util.*
 import javax.crypto.SecretKey
@@ -85,7 +86,7 @@ class JwtManager(
         }
 
         key = Keys.hmacShaKeyFor(keyBytes)
-        warning("JWT 管理器已初始化，密钥长度: ${secretKey.length} 字符 / ${keyBytes.size} 字节")
+        warning(LanguageManager.getMessage("auth.jwt-key-info", secretKey.length, keyBytes.size))
     }
 
     /**
@@ -136,7 +137,7 @@ class JwtManager(
 
         } catch (e: Exception) {
             // Token 无效（签名错误、过期、格式错误等）
-            warning("JWT token 验证失败: ${e.message}")
+            warning(LanguageManager.getMessage("auth.jwt-verify-failed", e.message ?: "Unknown error"))
             return null
         }
     }

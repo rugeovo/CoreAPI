@@ -1,6 +1,7 @@
 package org.ruge.coreapi.http
 
 import org.bukkit.plugin.Plugin
+import org.ruge.coreapi.lang.LanguageManager
 import taboolib.common.platform.function.info
 import java.util.concurrent.ConcurrentHashMap
 
@@ -63,7 +64,7 @@ class RouteRegistry {
         // 记录插件路由映射
         pluginRoutes.computeIfAbsent(plugin) { mutableListOf() }.add(routeKey)
 
-        info("路由已注册: ${method} ${normalizedPath} -> ${plugin.name}")
+        info(LanguageManager.getMessage("route.registered", method, normalizedPath, plugin.name))
     }
 
     /**
@@ -157,7 +158,7 @@ class RouteRegistry {
         }
 
         if (count > 0) {
-            info("已注销插件 ${plugin.name} 的 $count 个路由")
+            info(LanguageManager.getMessage("route.plugin-routes-unregistered", plugin.name, count))
         }
     }
 

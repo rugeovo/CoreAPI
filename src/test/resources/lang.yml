@@ -1,0 +1,13 @@
+# Test language file for unit tests
+
+startup:
+  loading: "CoreAPI 正在启动..."
+
+http:
+  server-started: "HTTP服务器已启动 - 端口: {0}"
+
+auth:
+  jwt-key-info: "JWT 管理器已初始化，密钥长度: {0} 字符 / {1} 字节"
+
+task:
+  scheduler-started: "任务调度器(Watchdog模式)已启动 - 队列: {0}, 吞吐量: {1}/tick, 熔断TPS: {2}"

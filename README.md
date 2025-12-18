@@ -1,606 +1,423 @@
-# CoreAPI
+# CoreAPI 项目概述
 
-**Minecraft Bukkit/Spigot HTTP API 框架**
-
-为 Minecraft 服务器提供 RESTful API 接口，支持 JWT 认证、权限管理、限流保护和 TPS 自适应调度。
+**CoreAPI 是一个为 Minecraft Bukkit 服务器提供的生产级 HTTP API 网关框架，集成认证、限流、任务调度、权限管理等完整生态。**
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Minecraft](https://img.shields.io/badge/minecraft-1.12+-green.svg)](https://www.spigotmc.org/)
 [![Java](https://img.shields.io/badge/java-8+-orange.svg)](https://adoptium.net/)
 [![Kotlin](https://img.shields.io/badge/kotlin-2.2+-purple.svg)](https://kotlinlang.org/)
+---
+
+## 核心问题与解决方案
+
+### 问题
+Minecraft 插件间需要 HTTP API 通信，但存在以下痛点：
+1. 每个插件单独实现 HTTP 服务器 → 端口混乱、代码重复
+2. 缺乏统一认证 → 安全性差
+3. HTTP 线程直接调用 Bukkit API → 线程安全问题、服务器崩溃
+4. 无防护机制 → 易受攻击（暴力破解、DoS）
+
+### 解决方案
+CoreAPI 提供统一的 HTTP 网关：
+- **统一端口**：所有插件共享一个 HTTP 服务器（Jetty）
+- **安全认证**：JWT + AuthMe + LuckPerms 三层防护
+- **线程安全**：智能任务调度器，HTTP 请求自动调度到 Bukkit 主线程
+- **防护机制**：限流、熔断、暴力破解防护、请求体大小限制
 
 ---
 
-## ⚠️ 安全警告
+## 技术架构
 
-**部署前必读：**
+### 架构图（数据流）
 
-1. **JWT 密钥必须修改** - 默认配置无法启动，必须生成随机密钥
-2. **HTTP 明文传输** - 密码和 token 可被窃听，生产环境必须使用 HTTPS
-3. **代理配置** - 错误的 `trust-proxy` 设置会导致限流被绕过
-
-详见 [生产部署检查清单](#生产部署检查清单)
-
----
-
-## 核心特性
-
-### TPS 自适应调度
-
-Minecraft 主线程每 tick 只有 50ms，传统 API 插件会阻塞主线程导致卡顿。CoreAPI 使用队列 + 看门狗机制：
-
-- **定量处理**：每 tick 最多处理 N 个任务（可配置）
-- **熔断保护**：TPS < 12 时自动停止 API 处理
-- **慢任务监控**：超过 10ms 的任务会触发告警
-- **队列积压警告**：防止内存溢出
-
-### 安全机制
-
-| 防护层级 | 机制 | 配置 |
-|---------|-----|------|
-| **网络层** | HTTPS (需外部配置) | Nginx/Cloudflare |
-| **传输层** | IP 限流 | 5 req/s/IP (全局) |
-| **认证层** | JWT Token | HS256 签名，24h 过期 |
-| **登录保护** | 独立限流 + 失败锁定 | 1 req/s/IP，5 次失败锁 15 分钟 |
-| **授权层** | LuckPerms 权限 | 细粒度路由权限 |
-| **应用层** | 输入验证 + DoS 防护 | 请求体 1MB 限制 |
-
-### 技术栈
-
-- **HTTP 服务器**：Jetty 11.0.20 (5-20 线程池，3s 超时)
-- **JWT 实现**：JJWT 0.12.3 (HS256 签名)
-- **限流**：Guava RateLimiter
-- **认证集成**：AuthMe 5.6.1
-- **权限集成**：LuckPerms 5.4
-
-### 内置 API
-
-| 路径 | 方法 | 认证 | 说明 |
-|-----|------|-----|------|
-| `/login` | POST | 否 | 用户登录，返回 JWT Token |
-| `/register` | POST | 否 | 用户注册，自动登录 |
-| `/status` | GET | 是 | 服务器状态 (TPS/队列/在线人数) |
-| `/routes` | GET | 否 | 所有已注册的路由列表 |
-
----
-
-## 快速开始
-
-### 依赖要求
-
-| 组件 | 版本 | 必需 | 说明 |
-|-----|------|-----|------|
-| Minecraft | Bukkit/Spigot 1.12+ | 是 | 推荐 Paper |
-| Java | JDK 8+ | 是 | |
-| TabooLib | 6.2.4+ | 是 | 自动下载 |
-| AuthMe | 5.6.1+ | 否 | 不装则无法使用 /login /register |
-| LuckPerms | 5.4+ | 否 | 不装则 requireAuth 无效 |
-
-### 安装
-
-```bash
-# 1. 下载插件到 plugins/ 目录
-wget https://github.com/your-repo/CoreAPI/releases/latest/download/CoreAPI.jar -P plugins/
-
-# 2. 启动服务器（首次启动会生成默认配置）
-java -jar server.jar
-
-# 3. 停止服务器，修改配置文件
+```
+┌─────────────────┐
+│   HTTP 客户端    │
+└────────┬────────┘
+         │ HTTP Request
+         ▼
+┌─────────────────────────────────────────────────┐
+│         CoreHttpServer (Jetty 11.0.20)          │
+│  ┌──────────────────────────────────────────┐   │
+│  │ 1. IP 获取 (trustProxy 决策)            │   │
+│  │ 2. 限流检查 (RateLimitManager: 5 req/s) │   │
+│  │ 3. 路由查找 (RouteRegistry)              │   │
+│  │ 4. 认证验证 (JWT + LuckPerms)           │   │
+│  └──────────────────────────────────────────┘   │
+└────────┬────────────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────────────┐
+│           RouteHandler 分派                      │
+├─────────────────────────────────────────────────┤
+│  ┌──────────────────┐   ┌───────────────────┐  │
+│  │ SyncRouteHandler │   │BukkitSyncRoute    │  │
+│  │                  │   │Handler            │  │
+│  │ (HTTP 线程执行)  │   │(主线程执行)       │  │
+│  │ 用于 I/O 操作   │   │用于 Bukkit API    │  │
+│  └──────────────────┘   └─────────┬─────────┘  │
+│                                    │             │
+│                                    ▼             │
+│                         ┌─────────────────────┐ │
+│                         │  TaskScheduler      │ │
+│                         │  (熔断 + 容量控制)  │ │
+│                         └─────────────────────┘ │
+└─────────────────────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────────────┐
+│         外部依赖（可选）                         │
+│  ┌──────────┐  ┌──────────┐  ┌──────────────┐  │
+│  │ AuthMe   │  │LuckPerms │  │Bukkit Server │  │
+│  │用户认证  │  │权限管理  │  │游戏逻辑      │  │
+│  └──────────┘  └──────────┘  └──────────────┘  │
+└─────────────────────────────────────────────────┘
 ```
 
-### 核心配置
+---
 
-编辑 `plugins/CoreAPI/config.yml`：
+## 核心模块
 
+### 1. HTTP 层 (`org.ruge.coreapi.http`)
+
+| 类 | 职责 | 关键特性 |
+|---|------|---------|
+| **CoreHttpServer** | Jetty HTTP 服务器封装 | • 端口配置<br>• CORS 支持<br>• trustProxy 反向代理支持<br>• 请求体大小限制（1MB） |
+| **RouteRegistry** | 路由注册表 | • 线程安全（ConcurrentHashMap）<br>• 热重载（插件卸载自动清理）<br>• 支持 GET/POST/PUT/DELETE/PATCH |
+| **RouteHandler** | 路由处理器接口 | • SyncRouteHandler（HTTP 线程）<br>• BukkitSyncRouteHandler（主线程）|
+| **RateLimitManager** | IP 限流器 | • Guava RateLimiter（5 req/s/IP）<br>• 自动过期清理（1 小时） |
+
+**数据结构设计评价**：🟢 简洁。`RouteRegistry` 用 `key = "$method:$path"` 存储，支持 O(1) 查找。`RateLimitManager` 用 Guava Cache 自动管理 IP 限流器生命周期，无需手动清理。
+
+---
+
+### 2. 认证层 (`org.ruge.coreapi.auth`)
+
+| 类 | 职责 | 关键特性 |
+|---|------|---------|
+| **AuthService** | AuthMe 集成 | • 登录/注册<br>• 独立限流（1 req/s/IP）<br>• 防暴力破解（5 次失败 → 15 分钟 IP 黑名单）<br>• 密码强度验证 |
+| **AuthManager** | LuckPerms 集成 | • JWT 验证<br>• 权限检查（支持通配符）<br>• UUID → 权限映射 |
+| **JwtManager** | JWT 生成验证 | • HS256 算法<br>• 24 小时有效期<br>• 密钥安全检查（强制 32+ 字符，禁用默认密钥） |
+| **TokenParser** | Token 解析 | • Bearer Token 提取<br>• JWT 签名验证<br>• 过期时间验证 |
+
+**防暴力破解机制**：
+```
+认证请求 → checkAuthRateLimit(1 req/s) → 检查 IP 黑名单 → 检查失败次数
+                                                ↓ 失败
+                        recordLoginFailure → 计数 +1 → 达到 5 次？
+                                                ↓ 是
+                                        IP 黑名单 15 分钟 + 清除计数器
+```
+
+**设计亮点**：达到阈值时立即清除计数器（`loginAttempts.invalidate(username)`），避免缓存过期的竞态条件。
+
+---
+
+### 3. 任务调度层 (`org.ruge.coreapi.task`)
+
+| 类 | 职责 | 关键特性 |
+|---|------|---------|
+| **TaskScheduler** | 主线程任务调度 | • 熔断保护（TPS < 12 停止处理）<br>• 流量控制（每 tick 最多 50 任务）<br>• 容量限制（Semaphore: 500）<br>• 超时监控（10ms 慢任务警告） |
+| **AsyncTask** | 异步任务包装 | • CompletableFuture 封装<br>• Semaphore 泄漏修复（超时/异常仍释放） |
+
+**熔断策略**：
+```kotlin
+if (tpsMonitor.getTPS() < minTpsThreshold) {
+    // TPS < 12 → 停止处理任务，避免雪上加霜
+    // 正确的舍弃策略：丢弃请求优于卡死整个服务器
+    return
+}
+```
+
+**评价**：🟢 好品味。使用 `while` 循环定量处理（每 tick 最多 50 个），不用复杂的优先级队列。Semaphore 确保容量，简单但有效。
+
+---
+
+### 4. 监控层 (`org.ruge.coreapi.util`)
+
+| 类 | 职责 | 关键特性 |
+|---|------|---------|
+| **TPSMonitor** | TPS 多窗口监控 | • 环形缓冲（18000 ticks = 15 分钟）<br>• 支持 1s/5s/1min/5min/15min 窗口<br>• AtomicInteger 线程安全<br>• 冷启动保护（数据不足时估算） |
+
+**数据结构**：
+```kotlin
+private val buffer = LongArray(18000)  // 18000 * 8 = 144 KB
+private val currentIndex = AtomicInteger(0)
+```
+
+**为什么用 LongArray？** 避免对象开销，提高缓存局部性。144 KB 完全可以接受。
+
+---
+
+## 技术栈
+
+### 核心依赖
+
+| 库 | 版本 | 用途 | 评价 |
+|----|------|------|------|
+| **Jetty** | 11.0.20 | HTTP 服务器 | 轻量级，比 Ktor/Spring 更适合插件环境 |
+| **JJWT** | 0.12.3 | JWT 生成验证 | 工业级库，支持所有标准算法 |
+| **Guava** | 32.1.3-jre | 缓存 + 限流 | RateLimiter 和 Cache 是经过验证的方案 |
+| **GSON** | 2.10.1 | JSON 序列化 | 简单直接，无需学习成本 |
+| **AuthMe API** | 5.6.1-SNAPSHOT | 用户认证 | 可选依赖 |
+| **LuckPerms API** | 5.4 | 权限管理 | 可选依赖 |
+| **Kotlin** | 2.2.0 | 编译 | stdlib + coroutines |
+
+### 编译配置
+```gradle
+Java: 1.8 兼容性（老版本 Minecraft 服务器）
+Kotlin: 2.2.0
+编译参数: -Xjvm-default=all（允许接口默认实现）
+```
+
+**依赖评价**：🟢 实用主义。选择成熟的库，不造轮子。Guava 的 Cache 和 RateLimiter 是工业级选择。
+
+---
+
+## 安全特性
+
+### 1. JWT 密钥安全（JwtManager.init）
+```kotlin
+// 三层防护：
+// 1. 禁止默认密钥（精确匹配）
+if (secret == "CHANGE-THIS-TO-A-RANDOM-SECRET-KEY-AT-LEAST-32-CHARS-LONG") {
+    throw SecurityException("请修改 JWT 密钥！")
+}
+
+// 2. 检查弱模式（"CHANGE", "DEFAULT" 等）
+val weakPatterns = listOf("change", "default", "secret", "key", "test")
+if (weakPatterns.any { secret.lowercase().contains(it) }) {
+    throw SecurityException("JWT 密钥包含弱模式")
+}
+
+// 3. 强制最小长度 32 字符 + 字节校验
+if (secret.length < 32 || secret.toByteArray().size < 32) {
+    throw SecurityException("JWT 密钥长度不足 32 字符")
+}
+```
+**评价**：🟢 好品味。不是所有项目都会硬性检查 JWT 密钥，这里做得很彻底。抛出 SecurityException 会导致插件无法启动，强制用户修改。
+
+### 2. 密码强度验证（CoreAPI.validatePassword）
+```
+• 长度：8-128 字符
+• 复杂度：必须包含字母 + 数字
+• 弱密码黑名单：12345678, password, qwerty123 等 10 个
+• 连续字符检查：禁止 7+ 个相同字符（aaaaaaaa）
+```
+
+### 3. 防 DoS
+```kotlin
+// 请求体大小限制（默认 1MB）
+if (req.contentLengthLong > maxBodySize) {
+    throw IllegalArgumentException("请求体过大")
+}
+
+// 使用 ByteArrayOutputStream 流式读取，定时检查总字节数
+```
+
+### 4. IP 地址获取安全
+```kotlin
+// trustProxy = false（默认）：只信任 req.remoteAddr
+// trustProxy = true：信任 X-Forwarded-For（仅限可信反向代理）
+```
+**警告**：错误配置 `trustProxy=true` 可能导致 IP 伪造攻击。默认 false 是正确的。
+
+---
+
+## 配置文件
+
+### config.yml
 ```yaml
-# JWT 密钥 - 必须修改！
+server:
+  port: 8080                        # HTTP 监听端口
+  enabled: true                     # 总开关
+  trust-proxy: false                # ⚠️ 仅在 Nginx/Cloudflare 后使用
+  max-body-size-bytes: 1048576      # 1MB 上限
+  cors-origin: "none"               # CORS 策略
+
+scheduler:
+  max-queue-size: 500               # 任务队列容量
+  max-tasks-per-tick: 50            # 每 tick 处理数（流量控制）
+  slow-task-threshold-ms: 10        # 慢任务报警
+  min-tps-threshold: 12.0           # 熔断 TPS 阈值
+  task-timeout-seconds: 10          # 任务超时
+
+rate-limit:
+  enabled: true                     # 全局限流（5 req/s/IP）
+  requests-per-second: 5.0
+
 jwt:
-  secret: "生成的随机字符串"  # 使用 openssl rand -base64 48 生成
+  secret: "CHANGE-THIS..."          # ⚠️ 必须修改！
   expiration-hours: 24
 
-# HTTP 服务器
-server:
-  port: 8080
-  enabled: true
-  trust-proxy: false        # 仅在 Nginx/Cloudflare 后设为 true
-  max-body-size-bytes: 1048576
-  cors-origin: "none"       # 生产环境保持 "none"
-
-# 限流
-rate-limit:
-  enabled: true
-  requests-per-second: 5.0  # 每 IP 每秒请求数
-
-# 安全
 auth:
-  max-login-attempts: 5     # 登录失败次数
-  lockout-minutes: 15       # 锁定时长
+  max-login-attempts: 5             # 登录失败限制
+  lockout-minutes: 15               # 账户锁定时间
 ```
 
-**生成 JWT 密钥**：
-```bash
-# Linux/Mac/WSL
-openssl rand -base64 48
+**配置管理特点**：所有配置值使用 `lazy` 委托缓存，避免每次都从文件读取。
 
-# Windows PowerShell
-[Convert]::ToBase64String((1..48 | %{ Get-Random -Max 256 }))
-```
+### lang.yml
+完整的中文本地化文件，覆盖所有消息：
+- 启动/关闭消息
+- 认证相关（JWT、AuthMe、LuckPerms）
+- HTTP 服务器
+- 路由管理
+- 任务调度统计
+- API 响应消息
 
-### 验证安装
+---
 
-```bash
-# 测试注册
-curl -X POST http://localhost:8080/register \
-  -H "Content-Type: application/json" \
-  -d '{"username":"test","password":"Test12345"}'
+## 内置 API 路由
 
-# 应返回：
-# {"success":true,"data":{"token":"eyJ...","uuid":"...","username":"test"},"timestamp":...}
+| 端点 | 方法 | 认证 | 功能 | 返回数据 |
+|------|------|------|------|----------|
+| `/login` | POST | ❌ | AuthMe 登录 | `{token, uuid, username}` |
+| `/register` | POST | ❌ | AuthMe 注册 | `{token, uuid, username}` |
+| `/status` | GET | ✅ | 服务器状态 | `{server, tps, queue_size, online_players}` |
+| `/routes` | GET | ✅ | 列出所有路由 | `{routes: [{method, path, plugin, require_auth}]}` |
 
-# 测试状态接口（需要 token）
-TOKEN="上一步返回的token"
-curl http://localhost:8080/status -H "Authorization: Bearer $TOKEN"
+**响应格式**（统一）：
+```json
+{
+  "success": boolean,
+  "data": Any?,
+  "error": String?,
+  "timestamp": Long
+}
 ```
 
 ---
 
-## 生产部署检查清单
+## 插件集成 API
 
-### 必须完成项 (无法启动/严重安全风险)
-
-- [ ] **修改 JWT 密钥**
-  ```bash
-  # 生成密钥
-  openssl rand -base64 48
-  # 替换 config.yml 中的 jwt.secret
-  ```
-
-- [ ] **配置 HTTPS**
-
-  **方案 A: Nginx 反向代理**
-  ```nginx
-  server {
-      listen 443 ssl http2;
-      server_name api.yourserver.com;
-
-      ssl_certificate /path/to/fullchain.pem;
-      ssl_certificate_key /path/to/privkey.pem;
-
-      location / {
-          proxy_pass http://localhost:8080;
-          proxy_set_header X-Forwarded-For $remote_addr;
-          proxy_set_header X-Real-IP $remote_addr;
-          proxy_set_header Host $host;
-      }
-  }
-  ```
-  然后设置 `trust-proxy: true`
-
-  **方案 B: Cloudflare**
-  1. 域名接入 Cloudflare
-  2. SSL/TLS 模式设为 "完全(严格)"
-  3. 设置 `trust-proxy: true`
-
-- [ ] **验证 CORS 配置**
-  - 生产环境：`cors-origin: "none"` 或具体域名
-  - 开发环境：`cors-origin: "*"`（测试完立即改回）
-
-### 强烈建议项 (生产环境标准)
-
-- [ ] **限制服务器访问**
-  ```bash
-  # 方案 A: 防火墙限制
-  # 仅允许 Nginx/Cloudflare 的 IP 访问 8080 端口
-
-  # 方案 B: 绑定内网 IP
-  # 修改 Jetty 监听地址（需改代码）
-  ```
-
-- [ ] **配置日志轮转**
-  - 使用 logback 或 log4j2
-  - 按日期/大小分割日志
-  - 保留 30 天
-
-- [ ] **监控告警**
-  - 定时检查 `/status` 接口
-  - 监控 TPS 和队列积压
-  - 设置告警阈值
-
-- [ ] **备份配置文件**
-  ```bash
-  cp plugins/CoreAPI/config.yml plugins/CoreAPI/config.yml.bak
-  ```
-
-### 可选优化项
-
-- [ ] 根据服务器性能调整参数
-  ```yaml
-  scheduler:
-    max-queue-size: 500      # 高配可调到 1000
-    max-tasks-per-tick: 50   # 高配可调到 100
-  rate-limit:
-    requests-per-second: 5.0 # 根据实际需求调整
-  ```
-
-- [ ] 安装依赖插件以启用完整功能
-  - AuthMe: 启用 /login /register
-  - LuckPerms: 启用权限验证
-
----
-
-## 开发者指南
-
-### 路由处理器类型
-
-CoreAPI 提供三种处理器，根据操作类型选择：
-
-| 类型 | 适用场景 | 线程 | 示例 |
-|-----|---------|------|------|
-| `SyncRouteHandler` | 只读操作，不修改游戏状态 | HTTP 线程 | 查询统计、获取配置 |
-| `BukkitSyncRouteHandler` | 修改游戏状态 | Bukkit 主线程 | 踢出玩家、发送消息 |
-| 自定义 | 完全控制线程调度 | 自定义 | 异步数据库查询 |
-
-### 示例 1: 只读接口
-
-**场景**：查询插件信息（不需要访问 Bukkit API）
-
+### 1. 注册路由
 ```kotlin
-import org.ruge.coreapi.CoreAPI
-import org.ruge.coreapi.http.*
+val registry = CoreAPI.getRouteRegistry()
 
-class MyPlugin : JavaPlugin() {
-    override fun onEnable() {
-        val coreAPI = server.pluginManager.getPlugin("CoreAPI") as CoreAPI
-        val registry = coreAPI.getRouteRegistry()
+// 注册不需要认证的路由
+registry.registerGet(plugin, "/myapi/public", MyHandler())
 
-        // 注册 GET /myplugin/info
-        registry.registerGet(this, "/myplugin/info", object : SyncRouteHandler() {
-            override fun handleSync(context: RequestContext): ApiResponse {
-                // 在 HTTP 线程执行，只能读取线程安全的数据
-                return ApiResponse.success(mapOf(
-                    "name" to description.name,
-                    "version" to description.version,
-                    "author" to description.authors.joinToString()
-                ))
-            }
-        }, requireAuth = false)
+// 注册需要认证 + 权限的路由
+registry.registerPost(
+    plugin = plugin,
+    path = "/myapi/admin",
+    handler = MyAdminHandler(),
+    requireAuth = true  // 需要 coreapi.route.{plugin}.{path} 权限
+)
+```
+
+### 2. 创建处理器
+
+**同步处理器（HTTP 线程执行）**：
+```kotlin
+class MyHandler : SyncRouteHandler() {
+    override fun handleSync(context: RequestContext): ApiResponse {
+        // 用于 I/O 操作（数据库查询、HTTP 请求等）
+        // 执行时间应 < 100ms
+        val data = fetchFromDatabase()
+        return ApiResponse.success(data)
     }
 }
 ```
 
-**测试**：
-```bash
-curl http://localhost:8080/myplugin/info
-```
-
-### 示例 2: 修改游戏状态
-
-**场景**：广播消息（需要调用 Bukkit API）
-
+**Bukkit 同步处理器（主线程执行）**：
 ```kotlin
-import org.bukkit.Bukkit
-
-registry.registerPost(this, "/myplugin/broadcast", object : BukkitSyncRouteHandler() {
+class MyBukkitHandler : BukkitSyncRouteHandler() {
     override fun handleBukkit(context: RequestContext): ApiResponse {
-        // 自动在 Bukkit 主线程执行，可以安全调用 Bukkit API
-
-        val message = context.getParam("message")
-            ?: return ApiResponse.error("缺少参数: message")
-
-        Bukkit.broadcastMessage("§e[API] §f$message")
-
-        return ApiResponse.success(mapOf(
-            "recipients" to Bukkit.getOnlinePlayers().size
-        ))
+        // 可以安全调用 Bukkit API
+        val player = Bukkit.getPlayer(context.body("player_name"))
+        player?.sendMessage("Hello!")
+        return ApiResponse.success(mapOf("sent" to true))
     }
-}, requireAuth = true)  // 需要认证
+}
 ```
 
-**权限配置** (需要 LuckPerms):
-```bash
-lp user steve permission set coreapi.route.myplugin.broadcast
-```
-
-**测试**：
-```bash
-# 1. 登录获取 token
-TOKEN=$(curl -s -X POST http://localhost:8080/login \
-  -H "Content-Type: application/json" \
-  -d '{"username":"steve","password":"yourpass"}' | jq -r '.data.token')
-
-# 2. 调用接口
-curl -X POST "http://localhost:8080/myplugin/broadcast?message=Hello" \
-  -H "Authorization: Bearer $TOKEN"
-```
-
-### 示例 3: JSON 请求体
-
+### 3. 提交任务到主线程
 ```kotlin
-import com.google.gson.Gson
+val future: CompletableFuture<String> = CoreAPI.submitTask {
+    // 这里是主线程，可以安全调用 Bukkit API
+    val onlinePlayers = Bukkit.getOnlinePlayers().size
+    "Online: $onlinePlayers"
+}
 
-data class KickRequest(val player: String, val reason: String)
+// 等待结果（带超时）
+val result = future.get(3, TimeUnit.SECONDS)
+```
 
-registry.registerPost(this, "/myplugin/kick", object : BukkitSyncRouteHandler() {
-    override fun handleBukkit(context: RequestContext): ApiResponse {
-        val body = context.body ?: return ApiResponse.error("请求体不能为空")
+---
 
-        val req = try {
-            Gson().fromJson(body, KickRequest::class.java)
-        } catch (e: Exception) {
-            return ApiResponse.error("JSON 格式错误")
-        }
+## 请求生命周期（完整示例）
 
-        val player = Bukkit.getPlayerExact(req.player)
-            ?: return ApiResponse.error("玩家不在线")
+### 用户登录全流程
+```
+客户端: POST /login {"username": "admin", "password": "Admin123456"}
+  ↓
+CoreApiServlet.doPost()
+  ├─ IP: 192.168.1.100
+  ├─ RateLimitManager.tryAcquire("192.168.1.100") ✅ 5 req/s/IP
+  ├─ 路由查询: RouteRegistry.getRouteInfo("/login", POST)
+  │  └─ 找到内置路由, requireAuth=false
+  ├─ 跳过认证检查
+  ├─ 调用 SyncRouteHandler:
+  │  ├─ GSON 解析: LoginRequest(username, password)
+  │  ├─ AuthService.login("admin", "Admin123456", "192.168.1.100")
+  │  │  ├─ checkAuthRateLimit("192.168.1.100") ✅ 1 req/s
+  │  │  ├─ ipBlacklist 检查: 无
+  │  │  ├─ loginAttempts 检查: 0/5
+  │  │  ├─ authMeApi.checkPassword("admin", pwd) ✅
+  │  │  ├─ loginAttempts.invalidate("admin")  ← 清除失败计数
+  │  │  ├─ uuid = Bukkit.getOfflinePlayer("admin").uniqueId
+  │  │  ├─ token = jwtManager.generateToken(uuid)
+  │  │  │  └─ Jwts.builder().subject(uuid).expiration(now+24h).signWith(key)
+  │  │  └─ 返回: LoginResult.success(token, uuid, "admin")
+  │  └─ ApiResponse.success({token, uuid, username})
+  └─ 返回 HTTP 200 + JSON
+```
 
-        player.kickPlayer(req.reason)
+### 使用 Token 访问受保护资源
+```
+客户端: GET /status, Authorization: Bearer eyJhbGci...
+  ↓
+CoreApiServlet.doGet()
+  ├─ RateLimitManager.tryAcquire("192.168.1.100") ✅
+  ├─ 路由查询: /status (GET), requireAuth=true
+  ├─ 认证检查:
+  │  ├─ context.getAuthToken() → "eyJhbGci..."
+  │  ├─ authManager.authenticate(token, "coreapi.route.coreapi.status")
+  │  ├─ tokenParser.validateJwt(token)
+  │  │  └─ jwtManager.validateToken(token) ✅ 签名 + 过期时间
+  │  ├─ authManager.checkPermission(uuid, "coreapi.route.coreapi.status")
+  │  │  └─ luckperms.userManager.getUser(uuid).checkPermission(...) ✅
+  │  └─ 认证通过
+  ├─ 调用处理器: /status 的 SyncRouteHandler
+  │  ├─ tps = TPSMonitor.getTPS()
+  │  ├─ queueSize = taskScheduler.getQueueSize()
+  │  └─ 返回状态 JSON
+  └─ 返回 HTTP 200
+```
 
-        return ApiResponse.success(mapOf("kicked" to req.player))
+---
+
+## 热重载机制
+
+### 插件卸载自动清理路由
+```kotlin
+// PluginListener.kt
+@EventHandler
+fun onPluginDisable(event: PluginDisableEvent) {
+    val count = routeRegistry.unregisterAllForPlugin(event.plugin)
+    if (count > 0) {
+        logger.info("插件 ${event.plugin.name} 卸载，清理了 $count 个路由")
     }
-}, requireAuth = true)
+}
 ```
 
-**测试**：
-```bash
-curl -X POST http://localhost:8080/myplugin/kick \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{"player":"Alex","reason":"违规"}'
-```
+**触发时机**：
+- 插件 `/reload` 命令
+- 插件被禁用
+- 服务器关闭
 
-### RequestContext API
-
-```kotlin
-val context: RequestContext
-
-context.method          // HttpMethod: GET/POST/PUT/DELETE
-context.uri             // String: "/myplugin/test"
-context.headers         // Map<String, String>
-context.params          // Map<String, String>  (URL 参数)
-context.body            // String? (仅 POST/PUT)
-context.clientIp        // String (尊重 trust-proxy 配置)
-
-context.getHeader("content-type")
-context.getParam("id")
-context.getAuthToken()  // 自动解析 "Bearer xxx"
-```
-
-### 权限节点规则
-
-默认格式：`coreapi.route.<plugin>.<path>`
-
-| 路径 | 权限节点 |
-|-----|---------|
-| `/myplugin/info` | `coreapi.route.myplugin.info` |
-| `/myplugin/admin/ban` | `coreapi.route.myplugin.admin.ban` |
-
-**自定义权限节点**：
-```kotlin
-registry.registerPost(
-    this,
-    "/admin/op",
-    handler,
-    requireAuth = true,
-    permission = "myplugin.admin.super"  // 覆盖默认规则
-)
-```
+**设计评价**：🟢 好。避免路由泄露，防止已卸载插件的路由仍然可访问。
 
 ---
-
-## 架构设计
-
-### 请求处理流程
-
-```
-HTTP Request
-    │
-    ▼
-[IP 限流] ───→ 429 Too Many Requests
-    │
-    ▼
-[路由查找] ───→ 404 Not Found
-    │
-    ▼
-[JWT 验证] ───→ 401 Unauthorized / 403 Forbidden
-    │
-    ▼
-[执行处理器]
-    ├─→ SyncRouteHandler ─────→ 直接返回
-    └─→ BukkitSyncRouteHandler
-            │
-            ▼
-      [TaskScheduler 队列]
-            │
-            ├─→ 队列满 ───→ 503 Service Unavailable
-            ├─→ TPS < 12 ─→ 503 (熔断)
-            │
-            ▼
-      [Bukkit 主线程执行]
-            │
-            ├─→ 成功 ───→ 200 OK
-            ├─→ 超时 ───→ 500 Timeout
-            └─→ 异常 ───→ 500 Internal Server Error
-```
-
-### TPS 自适应调度
-
-```kotlin
-每个 Tick (50ms):
-    1. 获取当前 TPS
-    2. 熔断检查：
-       - TPS < 12.0 → 停止处理，避免雪上加霜
-       - TPS >= 12.0 → 继续处理
-    3. 定量处理：
-       - 每 tick 最多处理 N 个任务（默认 50）
-       - 避免单 tick 处理数千任务导致瞬时卡顿
-    4. 看门狗监控：
-       - 任务超过 10ms → 告警
-       - 帮助发现慢任务
-```
-
-### 核心组件
-
-| 组件 | 职责 | 关键实现 |
-|-----|------|---------|
-| **CoreHttpServer** | HTTP 服务器 | Jetty 11.0.20, 5-20 线程池 |
-| **RouteRegistry** | 路由管理 | ConcurrentHashMap, 插件隔离 |
-| **TaskScheduler** | 主线程调度 | TPS 熔断, 定量处理, 看门狗 |
-| **JwtManager** | JWT 认证 | HS256 签名, 密钥强度验证 |
-| **AuthService** | 登录服务 | AuthMe 集成, 防暴力破解 |
-| **AuthManager** | 权限验证 | LuckPerms 集成 |
-| **RateLimitManager** | 限流 | Guava RateLimiter, 每 IP 独立 |
-
----
-
-## 性能与限制
-
-### 性能指标
-
-| 场景 | TPS 影响 | 吞吐量 | 延迟 |
-|------|---------|-------|------|
-| 低负载 (<10 req/s) | 无影响 | 50-100 req/s | <50ms |
-| 中负载 (10-50 req/s) | <0.1 TPS | 100-200 req/s | <100ms |
-| 高负载 (>100 req/s) | <0.5 TPS | 200-500 req/s | <200ms |
-
-*测试环境：Intel i5-9400F（6核），16GB RAM，Paper 1.20.1*
-
-### 系统限制
-
-| 限制项 | 默认值 | 说明 |
-|-------|--------|-----|
-| 队列容量 | 500 | 超出返回 503 |
-| HTTP 超时 | 3 秒 | Jetty 层 |
-| 任务超时 | 10 秒 | TaskScheduler 层 |
-| 请求体大小 | 1MB | 防止 DoS |
-| 限流速率 | 5 req/s/IP | 可配置 |
-
-### 最佳实践
-
-**✅ 推荐**
-- 只读操作用 `SyncRouteHandler`（更快，无需排队）
-- 修改游戏状态用 `BukkitSyncRouteHandler`（自动主线程调度）
-- 批量操作代替大量单次请求
-- 客户端实现 503 错误重试逻辑
-
-**❌ 不推荐**
-- 在 `SyncRouteHandler` 中调用 Bukkit API（会报错）
-- 在处理器中执行长时间阻塞操作（数据库查询、HTTP 请求）
-- 忽略 503 错误（应实现重试+退避算法）
-
----
-
-## 常见问题
-
-### Q: 如何获取在线玩家列表？
-
-```kotlin
-registry.registerGet(this, "/players", object : SyncRouteHandler() {
-    override fun handleSync(context: RequestContext): ApiResponse {
-        // 注意：Bukkit.getOnlinePlayers() 是线程安全的
-        val players = Bukkit.getOnlinePlayers().map {
-            mapOf("name" to it.name, "uuid" to it.uniqueId.toString())
-        }
-        return ApiResponse.success(mapOf("players" to players))
-    }
-}, requireAuth = true)
-```
-
-### Q: 如何处理长时间任务（如数据库查询）？
-
-使用自定义线程池，不要阻塞 Bukkit 主线程：
-
-```kotlin
-val executor = Executors.newFixedThreadPool(4)
-
-registry.registerGet(this, "/stats", object : RouteHandler {
-    override fun handle(context: RequestContext): CompletableFuture<ApiResponse> {
-        return CompletableFuture.supplyAsync({
-            // 在独立线程执行数据库查询
-            val stats = database.query("SELECT * FROM stats")
-            ApiResponse.success(stats)
-        }, executor)
-    }
-}, requireAuth = true)
-```
-
-### Q: 服务器启动失败，提示 JWT 密钥错误？
-
-检查 `config.yml` 中的 `jwt.secret`，必须：
-- 不能是默认值
-- 不能包含 CHANGE/DEFAULT/SECRET 等关键词
-- 长度至少 32 字符
-
-使用 `openssl rand -base64 48` 生成新密钥。
-
-### Q: 为什么返回 503 Service Unavailable？
-
-两种可能：
-1. **队列满了**：任务积压超过 500 个，说明处理速度跟不上请求速度
-2. **TPS 过低**：服务器卡顿（TPS < 12），触发熔断保护
-
-解决方案：
-- 检查日志中的慢任务告警
-- 调整 `max-queue-size` 和 `max-tasks-per-tick`
-- 优化插件代码，减少主线程阻塞
-
-### Q: 如何调试权限问题？
-
-```bash
-# 查看用户权限
-lp user steve permission info
-
-# 添加权限
-lp user steve permission set coreapi.route.myplugin.test
-
-# 查看权限节点生成规则
-# 路径: /myplugin/admin/ban
-# 权限节点: coreapi.route.myplugin.admin.ban
-```
-
----
-
-## 构建与开发
-
-```bash
-# 构建
-./gradlew build
-
-# 输出在 build/libs/CoreAPI-*.jar
-
-# 本地测试
-java -Xms2G -Xmx2G -jar paper-1.20.1.jar
-```
-
-**代码风格**：
-- 4 空格缩进
-- 函数保持简短（<50 行）
-- 避免深层嵌套（<3 层）
-- 优先考虑数据结构设计
-
----
-
-## 许可证
-
-MIT License - 详见 [LICENSE](LICENSE)
-
----
-
-## 致谢
-
-- **TabooLib** - Bukkit 插件开发框架
-- **Jetty** - HTTP 服务器
-- **JJWT** - JWT 实现
-- **Guava** - 限流器
-- **AuthMe** - 认证系统
-- **LuckPerms** - 权限管理
-
----
-
-## 支持
-
-- **Issues**: [GitHub Issues](https://github.com/your-repo/CoreAPI/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/your-repo/CoreAPI/discussions)
-
----
-
-**Built for the Minecraft community.**

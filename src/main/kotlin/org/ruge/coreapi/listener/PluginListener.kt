@@ -4,6 +4,7 @@ import org.bukkit.event.EventHandler
 import org.bukkit.event.Listener
 import org.bukkit.event.server.PluginDisableEvent
 import org.ruge.coreapi.http.RouteRegistry
+import org.ruge.coreapi.lang.LanguageManager
 import taboolib.common.platform.function.info
 
 /**
@@ -43,6 +44,6 @@ class PluginListener(
         // 3. 输出日志记录清理的路由数量
         routeRegistry.unregisterPlugin(plugin)
 
-        info("插件 ${plugin.name} 已卸载，路由已自动清理")
+        info(LanguageManager.getMessage("route.plugin-unloaded", plugin.name))
     }
 }

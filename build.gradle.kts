@@ -20,6 +20,12 @@ taboolib {
         taboolib = "6.2.4-65252583"
         coroutines = "1.8.1"
     }
+    description{
+        dependencies{
+            name("LuckPerms").with("bukkit").optional(true).loadafter(true)
+            name("AuthMe").with("bukkit").optional(true).loadafter(true)
+        }
+    }
 }
 
 repositories {
@@ -53,6 +59,10 @@ dependencies {
 
     // JSON处理
     implementation("com.google.code.gson:gson:2.10.1")
+    
+    // 测试依赖
+    testImplementation("org.junit.jupiter:junit-jupiter:5.10.0")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
 tasks.withType<JavaCompile> {
@@ -69,4 +79,8 @@ tasks.withType<KotlinCompile> {
 java {
     sourceCompatibility = JavaVersion.VERSION_1_8
     targetCompatibility = JavaVersion.VERSION_1_8
+}
+
+tasks.test {
+    useJUnitPlatform()
 }

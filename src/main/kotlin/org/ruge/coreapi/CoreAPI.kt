@@ -7,6 +7,7 @@ import org.ruge.coreapi.auth.JwtManager
 import org.ruge.coreapi.auth.TokenParser
 import org.ruge.coreapi.config.ConfigManager
 import org.ruge.coreapi.http.*
+import org.ruge.coreapi.lang.LanguageManager
 import org.ruge.coreapi.listener.PluginListener
 import org.ruge.coreapi.task.TaskScheduler
 import org.ruge.coreapi.util.TPSMonitor
@@ -15,6 +16,15 @@ import taboolib.common.platform.function.info
 import taboolib.common.platform.function.warning
 import java.util.concurrent.CompletableFuture
 
+/**
+ * CoreAPI 主插件类
+ * 
+ * 插件依赖说明：
+ * - LuckPerms: softdepend（可选依赖，用于权限验证）
+ * - AuthMe: softdepend（可选依赖，用于用户认证）
+ * 
+ * 如果这些插件在 CoreAPI 之后加载，权限验证会自动延迟初始化
+ */
 object CoreAPI : Plugin() {
 
     // 核心组件
@@ -75,14 +85,9 @@ object CoreAPI : Plugin() {
             )
         }
 
-        // 延迟初始化认证服务（等待 AuthMe 加载完成）
-        Bukkit.getScheduler().runTaskLater(
-            Bukkit.getPluginManager().getPlugin("CoreAPI")!!,
-            Runnable {
-                initializeAuthServices()
-            },
-            20L // 延迟 1 秒（20 ticks）
-        )
+        // 初始化认证服务
+        info("初始化认证服务...")
+        initializeAuthServices()
 
         // 注册内置API路由
         registerBuiltinRoutes()
@@ -108,7 +113,7 @@ object CoreAPI : Plugin() {
                 e.printStackTrace()
             }
         } else {
-            info("HTTP服务器已禁用（配置文件 server.enabled = false）")
+            info("HTTP服务器已禁用，CoreAPI 启动成功！")
         }
     }
 
@@ -122,7 +127,7 @@ object CoreAPI : Plugin() {
     }
 
     /**
-     * 初始化认证服务（延迟执行，确保 AuthMe 已加载）
+     * 初始化认证服务
      */
     private fun initializeAuthServices() {
         info("初始化认证服务...")
@@ -163,22 +168,22 @@ object CoreAPI : Plugin() {
             override fun handleSync(context: RequestContext): ApiResponse {
                 try {
                     // 解析请求体
-                    val body = context.body ?: return ApiResponse.error("请求体不能为空")
+                    val body = context.body ?: return ApiResponse.error(LanguageManager.getMessage("api.empty-body"))
                     val gson = com.google.gson.Gson()
                     val request = try {
                         gson.fromJson(body, LoginRequest::class.java)
                     } catch (e: com.google.gson.JsonSyntaxException) {
-                        return ApiResponse.error("JSON格式错误")
+                        return ApiResponse.error(LanguageManager.getMessage("api.json-syntax-error"))
                     } catch (e: com.google.gson.JsonParseException) {
-                        return ApiResponse.error("JSON解析失败")
+                        return ApiResponse.error(LanguageManager.getMessage("api.json-parse-error"))
                     }
 
                     // 验证参数
                     if (request.username.isBlank()) {
-                        return ApiResponse.error("用户名不能为空")
+                        return ApiResponse.error(LanguageManager.getMessage("api.username-empty"))
                     }
                     if (request.password.isBlank()) {
-                        return ApiResponse.error("密码不能为空")
+                        return ApiResponse.error(LanguageManager.getMessage("api.password-empty"))
                     }
 
                     // 获取客户端IP (安全)
@@ -196,13 +201,13 @@ object CoreAPI : Plugin() {
                             )
                         )
                     } else {
-                        ApiResponse.error(result.error ?: "登录失败")
+                        ApiResponse.error(result.error ?: LanguageManager.getMessage("api.login-failed"))
                     }
                 } catch (e: IllegalArgumentException) {
-                    return ApiResponse.error("参数错误: ${e.message}")
+                    return ApiResponse.error(LanguageManager.getMessage("api.param-error", e.message ?: ""))
                 } catch (e: Exception) {
-                    warning("登录异常: ${e.message}")
-                    return ApiResponse.error("登录服务异常，请稍后重试")
+                    warning(LanguageManager.getMessage("auth.login-exception", e.message ?: ""))
+                    return ApiResponse.error(LanguageManager.getMessage("api.login-service-exception"))
                 }
             }
         }, requireAuth = false)
@@ -212,28 +217,28 @@ object CoreAPI : Plugin() {
             override fun handleSync(context: RequestContext): ApiResponse {
                 try {
                     // 解析请求体
-                    val body = context.body ?: return ApiResponse.error("请求体不能为空")
+                    val body = context.body ?: return ApiResponse.error(LanguageManager.getMessage("api.empty-body"))
                     val gson = com.google.gson.Gson()
                     val request = try {
                         gson.fromJson(body, RegisterRequest::class.java)
                     } catch (e: com.google.gson.JsonSyntaxException) {
-                        return ApiResponse.error("JSON格式错误")
+                        return ApiResponse.error(LanguageManager.getMessage("api.json-syntax-error"))
                     } catch (e: com.google.gson.JsonParseException) {
-                        return ApiResponse.error("JSON解析失败")
+                        return ApiResponse.error(LanguageManager.getMessage("api.json-parse-error"))
                     }
 
                     // 验证用户名
                     if (request.username.isBlank()) {
-                        return ApiResponse.error("用户名不能为空")
+                        return ApiResponse.error(LanguageManager.getMessage("api.username-empty"))
                     }
                     if (request.username.length < 3) {
-                        return ApiResponse.error("用户名至少需要3个字符")
+                        return ApiResponse.error(LanguageManager.getMessage("api.username-too-short"))
                     }
                     if (request.username.length > 16) {
-                        return ApiResponse.error("用户名不能超过16个字符")
+                        return ApiResponse.error(LanguageManager.getMessage("api.username-too-long"))
                     }
                     if (!request.username.matches(Regex("^[a-zA-Z0-9_]+$"))) {
-                        return ApiResponse.error("用户名只能包含字母、数字和下划线")
+                        return ApiResponse.error(LanguageManager.getMessage("api.username-invalid-chars"))
                     }
 
                     // ✅ 安全修复：验证密码强度
@@ -257,13 +262,13 @@ object CoreAPI : Plugin() {
                             )
                         )
                     } else {
-                        ApiResponse.error(result.error ?: "注册失败")
+                        ApiResponse.error(result.error ?: LanguageManager.getMessage("api.register-failed"))
                     }
                 } catch (e: IllegalArgumentException) {
-                    return ApiResponse.error("参数错误: ${e.message}")
+                    return ApiResponse.error(LanguageManager.getMessage("api.param-error", e.message ?: ""))
                 } catch (e: Exception) {
-                    warning("注册异常: ${e.message}")
-                    return ApiResponse.error("注册服务异常，请稍后重试")
+                    warning(LanguageManager.getMessage("auth.register-exception", e.message ?: ""))
+                    return ApiResponse.error(LanguageManager.getMessage("api.register-service-exception"))
                 }
             }
         }, requireAuth = false)
@@ -300,7 +305,7 @@ object CoreAPI : Plugin() {
                 }
                 return ApiResponse.success(mapOf("routes" to routes))
             }
-        }, requireAuth = false)
+        }, requireAuth = true)
 
 
         info("内置路由已注册: /login, /register, /status, /routes")
@@ -349,21 +354,21 @@ object CoreAPI : Plugin() {
     private fun validatePassword(password: String): PasswordValidation {
         // 1. 长度检查
         if (password.length < 8) {
-            return PasswordValidation.invalid("密码至少需要8个字符")
+            return PasswordValidation.invalid(LanguageManager.getMessage("api.password-too-short"))
         }
 
         if (password.length > 128) {
-            return PasswordValidation.invalid("密码不能超过128个字符")
+            return PasswordValidation.invalid(LanguageManager.getMessage("api.password-too-long"))
         }
 
         // 2. 复杂度检查：必须包含字母
         if (!password.matches(Regex(".*[a-zA-Z].*"))) {
-            return PasswordValidation.invalid("密码必须包含至少1个字母")
+            return PasswordValidation.invalid(LanguageManager.getMessage("api.password-no-letter"))
         }
 
         // 3. 复杂度检查：必须包含数字
         if (!password.matches(Regex(".*[0-9].*"))) {
-            return PasswordValidation.invalid("密码必须包含至少1个数字")
+            return PasswordValidation.invalid(LanguageManager.getMessage("api.password-no-digit"))
         }
 
         // 4. 弱密码检查
@@ -372,12 +377,12 @@ object CoreAPI : Plugin() {
             "admin123", "letmein123", "welcome123", "monkey123", "dragon123"
         )
         if (commonWeakPasswords.contains(password.lowercase())) {
-            return PasswordValidation.invalid("密码过于简单，请使用更复杂的密码")
+            return PasswordValidation.invalid(LanguageManager.getMessage("api.password-too-weak"))
         }
 
         // 5. 连续字符检查（如 "11111111", "aaaaaaaa"）
         if (password.matches(Regex("(.)\\1{7,}"))) {
-            return PasswordValidation.invalid("密码不能包含过多重复字符")
+            return PasswordValidation.invalid(LanguageManager.getMessage("api.password-repeated-chars"))
         }
 
         return PasswordValidation.valid()

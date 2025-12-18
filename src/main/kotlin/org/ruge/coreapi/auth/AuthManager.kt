@@ -4,6 +4,7 @@ import net.luckperms.api.LuckPerms
 import net.luckperms.api.LuckPermsProvider
 import net.luckperms.api.model.user.User
 import org.bukkit.Bukkit
+import org.ruge.coreapi.lang.LanguageManager
 import taboolib.common.platform.function.info
 import taboolib.common.platform.function.warning
 import java.util.*
@@ -25,26 +26,54 @@ class AuthManager(
 
     /**
      * 初始化 LuckPerms API
+     * 
+     * 支持延迟初始化：如果 LuckPerms 尚未加载，会在后续请求时自动重试
      */
     fun initialize() {
+        tryInitializeLuckPerms()
+    }
+    
+    /**
+     * 尝试初始化 LuckPerms（支持延迟加载）
+     */
+    private fun tryInitializeLuckPerms(): Boolean {
+        // 如果已经初始化成功，直接返回
+        if (enabled && luckPerms != null) {
+            return true
+        }
+        
         try {
             // 检查 LuckPerms 插件是否存在
             val luckPermsPlugin = Bukkit.getPluginManager().getPlugin("LuckPerms")
             if (luckPermsPlugin == null || !luckPermsPlugin.isEnabled) {
-                warning("LuckPerms 插件未安装或未启用，权限认证功能已禁用")
+                // 首次检查时记录日志
+                if (luckPerms == null) {
+                    warning(LanguageManager.getMessage("auth.luckperms-not-found"))
+                    warning(LanguageManager.getMessage("auth.luckperms-delayed-init"))
+                }
                 enabled = false
-                return
+                return false
             }
 
             // 获取 LuckPerms API
             luckPerms = LuckPermsProvider.get()
             enabled = true
-            info("LuckPerms 权限认证已启用")
+            info(LanguageManager.getMessage("auth.luckperms-enabled"))
+            return true
 
-        } catch (e: Exception) {
-            warning("初始化 LuckPerms API 失败: ${e.message}")
-            warning("权限认证功能已禁用")
+        } catch (e: IllegalStateException) {
+            // LuckPerms API 尚未注册（插件加载顺序问题）
+            if (luckPerms == null) {
+                warning(LanguageManager.getMessage("auth.luckperms-not-ready"))
+                warning(LanguageManager.getMessage("auth.luckperms-retry"))
+            }
             enabled = false
+            return false
+        } catch (e: Exception) {
+            warning(LanguageManager.getMessage("auth.luckperms-init-failed", e.message ?: "Unknown error"))
+            warning(LanguageManager.getMessage("auth.luckperms-disabled"))
+            enabled = false
+            return false
         }
     }
 
@@ -61,16 +90,18 @@ class AuthManager(
      * @return AuthResult 认证结果
      */
     fun authenticate(token: String?, permission: String): AuthResult {
-        // 如果权限系统未启用，直接通过
+        // 尝试延迟初始化 LuckPerms（处理加载顺序问题）
+        if (!enabled) {
+            tryInitializeLuckPerms()
+        }
+        
+        // 如果权限系统仍未启用，直接通过
         if (!enabled) {
             return AuthResult.success(null)
         }
 
         // ✅ 安全修复：验证 JWT 签名和有效性
-        val payload = tokenParser.validateJwt(token)
-        if (payload == null) {
-            return AuthResult.failure("无效或已过期的 token")
-        }
+        val payload = tokenParser.validateJwt(token) ?: return AuthResult.failure("无效或已过期的 token")
 
         // 检查 token 是否过期
         if (payload.isExpired()) {
@@ -91,21 +122,27 @@ class AuthManager(
      * @return AuthResult 认证结果
      */
     fun checkPermission(uuid: UUID, permission: String): AuthResult {
+        // 再次确认 LuckPerms 可用（防止运行时被禁用）
         if (!enabled || luckPerms == null) {
-            return AuthResult.success(uuid)
+            // 尝试重新初始化
+            if (!tryInitializeLuckPerms()) {
+                return AuthResult.success(uuid)
+            }
         }
 
         try {
-            // ✅ 性能修复：使用 getUser() 同步获取缓存用户，而非 loadUser().join() 阻塞加载
-            // getUser() 只查询内存缓存，不会阻塞等待数据库 I/O
-            val user: User? = luckPerms!!.userManager.getUser(uuid)
+            // ✅ 性能优化：先尝试从缓存获取用户（快速路径）
+            var user: User? = luckPerms!!.userManager.getUser(uuid)
 
-            // 如果用户不在缓存中，说明用户数据未就绪（罕见情况）
+            // 缓存未命中：同步加载用户数据（慢速路径，但必须成功）
             if (user == null) {
-                warning("用户 $uuid 不在 LuckPerms 缓存中，触发异步加载")
-                // 触发异步加载（下次请求时会命中缓存）
-                luckPerms!!.userManager.loadUser(uuid)
-                return AuthResult.failure("用户数据未就绪，请稍后重试")
+                try {
+                    // 阻塞等待加载完成（罕见情况，用户体验优先于性能）
+                    user = luckPerms!!.userManager.loadUser(uuid).get()
+                } catch (e: Exception) {
+                    warning(LanguageManager.getMessage("auth.luckperms-load-user-failed", uuid, e.message ?: "Unknown error"))
+                    return AuthResult.failure("无法加载用户数据")
+                }
             }
 
             // 获取用户的权限数据
@@ -121,7 +158,7 @@ class AuthManager(
             }
 
         } catch (e: Exception) {
-            warning("检查权限时发生错误: ${e.message}")
+            warning(LanguageManager.getMessage("auth.luckperms-check-permission-failed", e.message ?: "Unknown error"))
             return AuthResult.failure("权限检查失败: ${e.message}")
         }
     }

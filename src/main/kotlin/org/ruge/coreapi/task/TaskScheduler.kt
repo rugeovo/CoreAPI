@@ -3,8 +3,9 @@ package org.ruge.coreapi.task
 import org.bukkit.Bukkit
 import org.bukkit.plugin.Plugin
 import org.ruge.coreapi.util.TPSMonitor
-import taboolib.common.platform.function.warning
+import org.ruge.coreapi.lang.LanguageManager
 import taboolib.common.platform.function.info
+import taboolib.common.platform.function.warning
 import java.util.concurrent.*
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -49,7 +50,7 @@ class TaskScheduler(
             logStats()
         }, 0L, 100L)
 
-        info("任务调度器(Watchdog模式)已启动 - 队列: $maxQueueSize, 吞吐量: $maxTasksPerTick/tick, 熔断TPS: $minTpsThreshold")
+        info(LanguageManager.getMessage("task.scheduler-started", maxQueueSize, maxTasksPerTick, minTpsThreshold))
     }
 
     private fun processTick() {
@@ -60,7 +61,7 @@ class TaskScheduler(
             if (TPSMonitor.getTPS() < minTpsThreshold) {
                 // 可选：如果长时间熔断，应该警告
                 if (System.currentTimeMillis() - lastWarningTime > 5000) {
-                    warning("⚠️ 服务器严重卡顿 (TPS < $minTpsThreshold) - 暂停处理 API 任务")
+                    warning(LanguageManager.getMessage("task.server-lag", minTpsThreshold))
                     lastWarningTime = System.currentTimeMillis()
                 }
                 return
@@ -81,7 +82,7 @@ class TaskScheduler(
                 // ✅ Semaphore 泄漏修复：execute() 返回是否真正执行
                 executed = task.execute()
             } catch (e: Exception) {
-                warning("任务执行异常: ${e.message}")
+                warning(LanguageManager.getMessage("task.execution-exception", e.message ?: "Unknown error"))
                 e.printStackTrace()
                 task.fail(e)
                 executed = true  // 即使失败也算执行了
@@ -100,7 +101,7 @@ class TaskScheduler(
             // 3. 慢任务报警
             // 如果一个任务卡了主线程，必须让开发者知道
             if (durationMs > slowTaskThresholdMs && executed) {
-                warning("⚠️ [主线程卡顿检测] 发现慢任务！耗时: %.2f ms (阈值: %d ms)".format(durationMs, slowTaskThresholdMs))
+                warning(LanguageManager.getMessage("task.slow-task", "%.2f".format(durationMs), slowTaskThresholdMs))
                 // 这里可以考虑打印堆栈或任务信息来定位问题
             }
         }
@@ -108,7 +109,7 @@ class TaskScheduler(
         // 4. 积压警告
         val queueSize = taskQueue.size
         if (queueSize > maxQueueSize * 0.8 && System.currentTimeMillis() - lastWarningTime > 5000) {
-            warning("⚠️ 任务队列高负载: $queueSize / $maxQueueSize - 请检查是否有插件在大量提交任务")
+            warning(LanguageManager.getMessage("task.queue-high-load", queueSize, maxQueueSize))
             lastWarningTime = System.currentTimeMillis()
         }
     }
@@ -137,7 +138,7 @@ class TaskScheduler(
                 // 释放 semaphore（因为任务不会被执行了）
                 queueLimit.release()
                 totalTimeout.incrementAndGet()
-                warning("任务超时已取消并释放资源")
+                warning(LanguageManager.getMessage("task.task-timeout"))
             }
             // 如果 cancel() 返回 false，说明任务已经开始执行
             // semaphore 会在 processTick 的 finally 块中释放
@@ -155,8 +156,7 @@ class TaskScheduler(
 
         if (processed > 0 || dropped > 0 || timeout > 0 || queueSize > 10) {
             val tps = TPSMonitor.getTPS()
-            info("调度统计 (TPS: %.1f) | 处理: %d | 积压: %d | 拒绝: %d | 超时: %d"
-                .format(tps, processed, queueSize, dropped, timeout))
+            info(LanguageManager.getMessage("task.scheduler-stats", "%.1f".format(tps), processed, queueSize, dropped, timeout))
         }
     }
 
