@@ -3,6 +3,7 @@ package org.ruge.coreapi.lang
 import taboolib.module.configuration.Config
 import taboolib.module.configuration.Configuration
 import taboolib.common.platform.function.warning
+import taboolib.module.chat.colored
 
 /**
  * 语言文件管理器
@@ -30,6 +31,6 @@ object LanguageManager {
 
         return args.foldIndexed(template) { index, acc, arg ->
             acc.replace("{$index}", arg.toString())
-        }
+        }.colored()
     }
 }

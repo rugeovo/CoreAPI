@@ -181,7 +181,7 @@ class RouteRegistry {
             normalized = "/$normalized"
         }
         if (normalized.length > 1 && normalized.endsWith("/")) {
-            normalized = normalized.substring(0, normalized.length - 1)
+            normalized = normalized.dropLast(1)
         }
         return normalized.lowercase()
     }

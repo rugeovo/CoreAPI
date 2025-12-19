@@ -30,10 +30,10 @@ object CoreAPI : Plugin() {
     private lateinit var authService: AuthService
 
     override fun onEnable() {
-        info("CoreAPI 正在启动...")
+        info(LanguageManager.getMessage("startup.loading"))
 
         // 启动TPS监控
-        info("启动TPS监控...")
+        info(LanguageManager.getMessage("startup.tps-monitor"))
         Bukkit.getScheduler().scheduleSyncRepeatingTask(
             Bukkit.getPluginManager().getPlugin("CoreAPI")!!,
             TPSMonitor,
@@ -42,10 +42,10 @@ object CoreAPI : Plugin() {
         )
 
         // 初始化配置
-        info("加载配置文件...")
+        info(LanguageManager.getMessage("startup.config"))
 
         // 初始化任务调度器
-        info("初始化任务调度器...")
+        info(LanguageManager.getMessage("startup.task-scheduler"))
         taskScheduler = TaskScheduler(
             plugin = Bukkit.getPluginManager().getPlugin("CoreAPI")!!,
             maxQueueSize = ConfigManager.maxQueueSize,
@@ -57,11 +57,11 @@ object CoreAPI : Plugin() {
         taskScheduler.start()
 
         // 初始化路由注册表
-        info("初始化路由注册表...")
+        info(LanguageManager.getMessage("startup.route-registry"))
         routeRegistry = RouteRegistry()
 
         // 注册插件卸载监听器（支持热重载）
-        info("注册插件卸载监听器...")
+        info(LanguageManager.getMessage("startup.plugin-listener"))
         Bukkit.getPluginManager().registerEvents(
             PluginListener(routeRegistry),
             Bukkit.getPluginManager().getPlugin("CoreAPI")!!
@@ -69,7 +69,7 @@ object CoreAPI : Plugin() {
 
         // 初始化限流管理器
         if (ConfigManager.rateLimitEnabled) {
-            info("初始化限流管理器...")
+            info(LanguageManager.getMessage("startup.rate-limiter"))
             rateLimitManager = RateLimitManager(
                 requestsPerSecond = ConfigManager.rateLimitRequestsPerSecond,
                 cacheExpireHours = ConfigManager.rateLimitCacheExpireHours
@@ -77,7 +77,7 @@ object CoreAPI : Plugin() {
         }
 
         // 初始化认证服务
-        info("初始化认证服务...")
+        info(LanguageManager.getMessage("startup.auth-service"))
         initializeAuthServices()
 
         // 注册内置API路由
@@ -85,7 +85,7 @@ object CoreAPI : Plugin() {
 
         // 启动HTTP服务器
         if (ConfigManager.serverEnabled) {
-            info("启动HTTP服务器...")
+            info(LanguageManager.getMessage("startup.http-server"))
             httpServer = CoreHttpServer(
                 port = ConfigManager.serverPort,
                 routeRegistry = routeRegistry,
@@ -98,40 +98,38 @@ object CoreAPI : Plugin() {
             )
             try {
                 httpServer?.startServer()
-                info("CoreAPI 启动成功！")
+                info(LanguageManager.getMessage("startup.success"))
             } catch (e: Exception) {
-                warning("HTTP服务器启动失败: ${e.message}")
+                warning(LanguageManager.getMessage("startup.http-failed", e.message ?: "Unknown error"))
                 e.printStackTrace()
             }
         } else {
-            info("HTTP服务器已禁用，CoreAPI 启动成功！")
+            info(LanguageManager.getMessage("startup.success-no-http"))
         }
     }
 
     override fun onDisable() {
-        info("CoreAPI 正在关闭...")
+        info(LanguageManager.getMessage("shutdown.closing"))
 
         // 停止HTTP服务器
         httpServer?.stopServer()
 
-        info("CoreAPI 已关闭")
+        info(LanguageManager.getMessage("shutdown.closed"))
     }
 
     /**
      * 初始化认证服务
      */
     private fun initializeAuthServices() {
-        info("初始化认证服务...")
-
         // 初始化JWT管理器
-        info("初始化JWT管理器...")
+        info(LanguageManager.getMessage("auth.jwt-init"))
         jwtManager = JwtManager(
             secretKey = ConfigManager.jwtSecret,
             expirationHours = ConfigManager.jwtExpirationHours
         )
 
         // 初始化认证服务
-        info("初始化AuthMe认证服务...")
+        info(LanguageManager.getMessage("auth.authme-init"))
         authService = AuthService(
             jwtManager = jwtManager,
             maxLoginAttempts = ConfigManager.authMaxLoginAttempts,
@@ -140,12 +138,12 @@ object CoreAPI : Plugin() {
         authService.initialize()
 
         // 初始化权限认证管理器
-        info("初始化LuckPerms权限管理器...")
+        info(LanguageManager.getMessage("auth.luckperms-init"))
         val tokenParser = TokenParser(jwtManager)
         authManager = AuthManager(tokenParser)
         authManager!!.initialize()
 
-        info("认证服务初始化完成")
+        info(LanguageManager.getMessage("auth.auth-complete"))
     }
 
     /**
@@ -299,7 +297,7 @@ object CoreAPI : Plugin() {
         }, requireAuth = true)
 
 
-        info("内置路由已注册: /login, /register, /status, /routes")
+        info(LanguageManager.getMessage("route.builtin-registered"))
     }
 
     // 请求数据类
