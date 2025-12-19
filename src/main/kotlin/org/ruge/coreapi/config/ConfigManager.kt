@@ -38,4 +38,10 @@ object ConfigManager {
     // 登录安全配置 - 使用 lazy 缓存
     val authMaxLoginAttempts: Int by lazy { config.getInt("auth.max-login-attempts", 5) }
     val authLockoutMinutes: Int by lazy { config.getInt("auth.lockout-minutes", 15) }
+
+    // 内置路由配置 - 使用 lazy 缓存
+    val builtinRouteLogin: Boolean by lazy { config.getBoolean("builtin-routes.login", true) }
+    val builtinRouteRegister: Boolean by lazy { config.getBoolean("builtin-routes.register", true) }
+    val builtinRouteStatus: Boolean by lazy { config.getBoolean("builtin-routes.status", true) }
+    val builtinRouteRoutes: Boolean by lazy { config.getBoolean("builtin-routes.routes", true) }
 }

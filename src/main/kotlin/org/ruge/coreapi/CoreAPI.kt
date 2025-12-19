@@ -153,7 +153,8 @@ object CoreAPI : Plugin() {
         val plugin = Bukkit.getPluginManager().getPlugin("CoreAPI")!!
 
         // POST /login - 用户登录
-        routeRegistry.registerPost(plugin, "/login", object : SyncRouteHandler() {
+        if (ConfigManager.builtinRouteLogin) {
+            routeRegistry.registerPost(plugin, "/login", object : SyncRouteHandler() {
             override fun handleSync(context: RequestContext): ApiResponse {
                 try {
                     // 解析请求体
@@ -200,9 +201,11 @@ object CoreAPI : Plugin() {
                 }
             }
         }, requireAuth = false)
+        }
 
         // POST /register - 用户注册
-        routeRegistry.registerPost(plugin, "/register", object : SyncRouteHandler() {
+        if (ConfigManager.builtinRouteRegister) {
+            routeRegistry.registerPost(plugin, "/register", object : SyncRouteHandler() {
             override fun handleSync(context: RequestContext): ApiResponse {
                 try {
                     // 解析请求体
@@ -261,9 +264,11 @@ object CoreAPI : Plugin() {
                 }
             }
         }, requireAuth = false)
+        }
 
         // GET /status - 服务器状态
-        routeRegistry.registerGet(plugin, "/status", object : SyncRouteHandler() {
+        if (ConfigManager.builtinRouteStatus) {
+            routeRegistry.registerGet(plugin, "/status", object : SyncRouteHandler() {
             override fun handleSync(context: RequestContext): ApiResponse {
                 val tps = TPSMonitor.getTPS()
                 val queueSize = taskScheduler.getQueueSize()
@@ -280,9 +285,11 @@ object CoreAPI : Plugin() {
                 )
             }
         }, requireAuth = true)
+        }
 
         // GET /routes - 路由列表
-        routeRegistry.registerGet(plugin, "/routes", object : SyncRouteHandler() {
+        if (ConfigManager.builtinRouteRoutes) {
+            routeRegistry.registerGet(plugin, "/routes", object : SyncRouteHandler() {
             override fun handleSync(context: RequestContext): ApiResponse {
                 val routes = routeRegistry.getAllRoutes().map {
                     mapOf(
@@ -295,6 +302,7 @@ object CoreAPI : Plugin() {
                 return ApiResponse.success(mapOf("routes" to routes))
             }
         }, requireAuth = true)
+        }
 
 
         info(LanguageManager.getMessage("route.builtin-registered"))

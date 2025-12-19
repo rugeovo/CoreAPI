@@ -54,3 +54,14 @@ auth:
   max-login-attempts: 5
   # 锁定时间（分钟）
   lockout-minutes: 15
+
+# 内置路由配置
+builtin-routes:
+  # POST /login - 用户登录
+  login: true
+  # POST /register - 用户注册
+  register: true
+  # GET /status - 服务器状态
+  status: true
+  # GET /routes - 路由列表
+  routes: true
