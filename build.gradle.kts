@@ -13,7 +13,7 @@ plugins {
     `maven-publish`
 }
 
-group = "com.github.rugeovo"
+group = "org.ruge.coreapi"
 version = "1.0.0"
 
 taboolib {
